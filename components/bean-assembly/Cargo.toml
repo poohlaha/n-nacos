@@ -1,0 +1,23 @@
+[package]
+name = "bean-assembly"
+version = "0.1.0"
+edition = "2021"
+authors = ["poohlaha"]
+license = "MIT/Apache-2.0"
+description = "Bean Assembly, `@component`、`@inject` etc."
+homepage = ""
+repository = ""
+readme = "README.md"
+keywords = ["bean", "assembly", "bean-assembly"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+proc-macro2 = "0.3"
+proc-macro-error = "1"
+quote = "1"
+syn = "2.0"
+
+[lib]
+proc-macro = true
+
