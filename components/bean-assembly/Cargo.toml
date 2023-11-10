@@ -16,7 +16,11 @@ keywords = ["bean", "assembly", "bean-assembly"]
 proc-macro2 = "0.3"
 proc-macro-error = "1"
 quote = "1"
-syn = "2.0"
+syn = "2"
+
+[dev-dependencies]
+bean-factory = {path = "../bean-factory"}
+actix = "0.13"
 
 [lib]
 proc-macro = true

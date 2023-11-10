@@ -39,7 +39,7 @@ impl BeanFactory {
     }
 
     /// 初始化工厂, 创建 `Bean` 实例, 不返回数据
-    pub fn init_without_result(&self) {
+    pub fn register_without_result(&self) {
         self.core.do_send(Factory);
     }
 

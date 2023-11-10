@@ -28,6 +28,22 @@ impl BeanInstance {
         }
     }
 
+    /// 根据 `name` 初始化
+    pub fn init_with_name<T: Default + Any + 'static + Send + Sync>(name: &str) -> Self {
+        let mut type_name = std::any::type_name::<T>().to_string();
+        if !name.is_empty() {
+            type_name = name.to_string();
+        }
+
+        Self {
+            type_name,
+            provider: Provider::Fn(Arc::new(move || {
+                Some(T::default()).map(|e| Arc::new(e) as Arc<DynAny>)
+            })),
+            notify: None,
+        }
+    }
+
     /// 根据 `Value` 初始化 `Bean`
     pub fn init_with_value<T: 'static + Send + Sync>(value: Arc<T>) -> Self {
         Self {
@@ -52,3 +68,6 @@ impl BeanInstance {
         }
     }
 }
+
+// 使用 `inventory` 来管理 `BeanInstance`
+inventory::collect!(BeanInstance);

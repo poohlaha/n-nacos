@@ -7,3 +7,6 @@ pub mod bean;
 
 mod actor;
 
+/// 使用 `inventory` 的 `submit`, 用于宏
+pub use inventory::submit;
+

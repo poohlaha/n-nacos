@@ -1,8 +1,8 @@
-use bean_factory::bean::BeanInstance;
-use bean_factory::factory::BeanFactory;
 /**!
    测试用例
 */
+use bean_factory::bean::BeanInstance;
+use bean_factory::factory::BeanFactory;
 use std::sync::Arc;
 
 #[actix::test]
