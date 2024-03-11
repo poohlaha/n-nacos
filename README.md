@@ -12,3 +12,12 @@ pnpm tauri dev
 ```shell
 pnpm tauri build
 ```
+
+## Rust 插件
+- 监控程序
+  [n-nacos-tools](https://github.com/poohlaha/monitor)
+
+
+## H5 插件
+- 流水线组件
+  [pipeline-draggable](https://github.com/poohlaha/pipeline-draggable)
