@@ -20,16 +20,38 @@ impl PipelineBasic {
 /// 流程配置
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineProcessConfig {
+    pub(crate) stages: Vec<PipelineStage>,
+}
+
+/// 流水线阶段, 一个阶段包括多个分组
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStage {
+    pub(crate) groups: Vec<PipelineGroup>,
+}
+
+/// 流水线分组
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineGroup {
+    pub(crate) title: String,
     pub(crate) steps: Vec<PipelineStep>,
 }
 
 /// 流水线步骤
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineStep {
-    pub(crate) key: String,
+    pub(crate) id: String,
+    pub(crate) module: String,
+    pub(crate) command: String,
     pub(crate) label: String,
     pub(crate) status: PipelineCommandStatus,
-    pub(crate) commands: Vec<String>, // 运行命令集合
+    pub(crate) components: Vec<PipelineStepComponent>
+}
+
+/// 流水线步骤组件
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStepComponent {
+    pub(crate) prop: String,
+    pub(crate) value: String,
 }
 
 /// 流水线运行命令状态
@@ -52,7 +74,7 @@ impl Default for PipelineCommandStatus {
 
 impl PipelineProcessConfig {
     pub(crate) fn is_empty(config: &PipelineProcessConfig) -> bool {
-        return config.steps.is_empty();
+        return config.stages.is_empty();
     }
 }
 
@@ -94,6 +116,8 @@ pub struct ExtraVariable {
 /// 附加的 H5 变量
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct H5ExtraVariable {
+    #[serde(rename = "displayFields")]
+    pub(crate) display_fields: Vec<DisplayField>,
     pub(crate) selected: Option<H5ExtraSelectedVariable>,
     pub(crate) node: String,
     #[serde(rename = "makeCommands")]
@@ -103,6 +127,17 @@ pub struct H5ExtraVariable {
     #[serde(rename = "packageCommands")]
     pub(crate) package_commands: Vec<String>,
 }
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct DisplayField {
+    pub(crate) label: String,
+    pub(crate) value: String,
+    #[serde(rename = "type")]
+    pub(crate) show_type: String, // str | select
+    pub(crate) desc: String,
+    pub(crate) key: String
+}
+
 
 /// 附加的选中的 H5 变量
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -189,8 +224,8 @@ pub struct PipelineRunVariable {
 pub struct PipelineCurrentRun {
     pub(crate) order: u32,               // 顺序
     pub(crate) status: PipelineStatus,   // 运行状态
-    pub(crate) step: u32,                // 运行到哪一步
-    pub(crate) steps: Vec<PipelineStep>, // 构建过程
+    pub(crate) step: Vec<u32>,                // 运行到哪一步
+    pub(crate) stages: Vec<PipelineStage>, // 构建过程
     #[serde(rename = "startTime")]
     pub(crate) start_time: String, // 开始时间
     pub(crate) duration: u32,            // 运行时长, 单位秒
@@ -261,4 +296,11 @@ impl PipelineTag {
             PipelineTag::H5 => false,
         };
     }
+}
+
+/// 系统命令集
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct OsCommands {
+    #[serde(rename = "h5InstalledCommands")]
+    pub(crate) h5_installed_commands: Vec<String>
 }

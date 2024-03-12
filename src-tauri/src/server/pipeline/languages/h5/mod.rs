@@ -2,7 +2,7 @@
 
 use crate::helper::git::GitHandler;
 use crate::helper::index::Helper;
-use crate::server::pipeline::props::H5ExtraVariable;
+use crate::server::pipeline::props::{DisplayField, H5ExtraVariable};
 use handlers::file::FileHandler;
 use log::info;
 use regex::Regex;
@@ -16,9 +16,13 @@ pub(crate) const H5_INSTALLED_CMDS: [&str; 4] = ["npm", "yarn", "pnpm", "cnpm"];
 impl H5FileHandler {
     /// 获取默认的文件命令
     pub fn get_default_file_commands(url: &str) -> Option<H5ExtraVariable> {
+        // display fields
         if GitHandler::is_remote_url(url) {
             info!("get default file commands failed, `{}` is a remote url!", url);
-            return None;
+            return Some(H5ExtraVariable {
+                display_fields: Self::get_display_fields(&Vec::new(), &Vec::new()),
+                ..Default::default()
+            });
         }
 
         let path = Path::new(url);
@@ -33,7 +37,9 @@ impl H5FileHandler {
         // package.json
         let package_commands = Self::get_package_commands(url);
 
+        let display_fields = Self::get_display_fields(&make_commands, &package_commands);
         return Some(H5ExtraVariable {
+            display_fields,
             selected: None,
             node: String::new(),
             make_commands,
@@ -175,4 +181,53 @@ impl H5FileHandler {
         return Err(Error::convert_string("can not git remote file: `{}` content!"))
     }
      */
+
+    /// 获取展示列表
+    fn get_display_fields(make_commands: &Vec<String>, package_commands: &Vec<String>) -> Vec<DisplayField> {
+        let mut display_fields: Vec<DisplayField> = Vec::new();
+        display_fields.push(DisplayField {
+            label: "node".to_string(),
+            value: "node".to_string(),
+            show_type: "str".to_string(),
+            desc: "NodeJs版本号".to_string(),
+            key: "node".to_string(),
+        });
+
+        display_fields.push(DisplayField {
+            label: "branch".to_string(),
+            value: "branch".to_string(),
+            show_type: "select".to_string(),
+            desc: "分支列表".to_string(),
+            key: "branches".to_string(),
+        });
+
+        if make_commands.len() > 0 {
+            display_fields.push(DisplayField {
+                label: "make".to_string(),
+                value: "make".to_string(),
+                show_type: "select".to_string(),
+                desc: "Make命令".to_string(),
+                key: "makeCommands".to_string(),
+            });
+        }
+
+        if package_commands.len() > 0 {
+            display_fields.push(DisplayField {
+                label: "command".to_string(),
+                value: "command".to_string(),
+                show_type: "select".to_string(),
+                desc: "本机安装的命令列表".to_string(),
+                key: "installedCommands".to_string(),
+            });
+            display_fields.push(DisplayField {
+                label: "script".to_string(),
+                value: "script".to_string(),
+                show_type: "select".to_string(),
+                desc: "package.json中的scripts命令".to_string(),
+                key: "packageCommands".to_string(),
+            });
+        }
+
+        return display_fields
+    }
 }

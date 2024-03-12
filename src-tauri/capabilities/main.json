@@ -12,6 +12,7 @@
     "menu:default",
     "tray:default",
     "shell:allow-open",
-    "log:default"
+    "log:default",
+    "dialog:allow-open"
   ]
 }

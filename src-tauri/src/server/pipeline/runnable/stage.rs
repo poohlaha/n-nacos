@@ -1,4 +1,4 @@
-//! 步骤
+//! 流水线阶段
 
 use crate::database::interface::Treat;
 use crate::error::Error;
@@ -11,7 +11,7 @@ use crate::prepare::{convert_res, get_error_response, HttpResponse};
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunProps, PipelineStatus, PipelineStep, PipelineTag};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunProps, PipelineStage, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
 use sftp::config::Upload;
@@ -22,9 +22,10 @@ use tauri::AppHandle;
 
 const DIR_NAME: &str = "projects";
 
-pub struct PipelineRunnableStep;
+pub struct PipelineRunnableStage;
 
-impl PipelineRunnableStep {
+impl PipelineRunnableStage {
+
     pub(crate) fn exec(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRunProps, steps: Vec<PipelineStep>, order: u32) {
         let installed_commands = H5FileHandler::get_installed_commands();
         info!("installed_commands: {:#?}", installed_commands);
@@ -362,13 +363,13 @@ impl PipelineRunnableStep {
 
     fn exec_end_log(app: &AppHandle, success: bool, msg: &str, pipeline: &Pipeline, props: &PipelineRunProps, order: u32) -> Option<Pipeline> {
         let mut step: u32 = 0;
-        let mut steps: Vec<PipelineStep> = Vec::new();
+        let mut stages: Vec<PipelineStage> = Vec::new();
         // 更新 step
         let run = pipeline.run.clone();
         if let Some(run) = run {
             let current = run.current;
-            step = current.step;
-            steps = current.steps;
+            // step = current.step; // TODO
+            stages = current.stages;
         }
 
         let mut status: Option<PipelineStatus> = None;
@@ -381,7 +382,7 @@ impl PipelineRunnableStep {
         // 成功, 更新 step, 更新状态
         if success {
             // 完成
-            if step == steps.len() as u32 {
+            if step == stages.len() as u32 {
                 status = Some(PipelineStatus::Success)
             }
 
@@ -414,7 +415,7 @@ impl PipelineRunnableStep {
             return Err(Error::convert_string(&msg));
         }
 
-        let (cmds, cmd) = Self::get_h5_install_cmd(project_path.clone(), project_name)?;
+        let (cmds, _) = Self::get_h5_install_cmd(project_path.clone(), project_name)?;
         if cmds.is_empty() {
             let msg = "can not found any commands !";
             error!("{}", msg);

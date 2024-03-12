@@ -18,7 +18,7 @@ use exports::server::{delete_server, get_server_detail, get_server_list, insert_
 
 use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::system::tray::Tray;
-use exports::pipeline::{delete_pipeline, exec_steps, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, update_pipeline};
+use exports::pipeline::{delete_pipeline, exec_steps, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, update_pipeline, query_os_commands};
 
 const PROJECT_NAME: &str = "n-nacos";
 
@@ -59,6 +59,7 @@ fn main() {
             delete_pipeline,
             get_pipeline_detail,
             pipeline_run,
+            query_os_commands,
             exec_steps,
             pipeline_batch_run,
             start_monitor,

@@ -88,3 +88,10 @@ pub async fn pipeline_batch_run(app: AppHandle, list: Vec<PipelineRunProps>) -> 
     let app_cloned = Arc::new(app.clone());
     Task::task_batch_param(list, move |list| PipelineRunnable::batch_exec(&*app_cloned, list.clone())).await
 }
+
+/// 查询系统已安装的 commands 列表
+#[tauri::command]
+pub async fn query_os_commands() -> Result<HttpResponse, String> {
+    Task::task(|| Pipeline::query_os_commands()).await
+}
+

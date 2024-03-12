@@ -1,6 +1,6 @@
 //! 流水线运行
 
-pub(crate) mod steps;
+pub(crate) mod stage;
 
 use crate::database::interface::Treat;
 use crate::error::Error;
@@ -8,7 +8,7 @@ use crate::event::EventEmitter;
 use crate::prepare::{get_error_response, get_success_response, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::props::{PipelineHistoryRun, PipelineRunProps, PipelineStatus};
-use crate::server::pipeline::runnable::steps::PipelineRunnableStep;
+use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 use crate::MAX_THREAD_COUNT;
 use handlers::utils::Utils;
 use log::info;
@@ -97,10 +97,12 @@ impl PipelineRunnable {
                             current.duration = duration;
                         }
 
-                        // step
+                        // step TODO
+                        /*
                         if let Some(step) = step {
                             current.step = step;
                         }
+                         */
 
                         // branch
                         if let Some(branch) = branch {
@@ -183,14 +185,14 @@ impl PipelineRunnable {
                         if let Some(run) = run {
                             let current = run.current.clone();
                             let order = current.order;
-                            let steps = current.steps;
-                            if steps.is_empty() {
-                                Self::emit_error_response(app, "exec steps failed, `steps` props is empty !");
+                            let stages = current.stages;
+                            if stages.is_empty() {
+                                Self::emit_error_response(app, "exec stages failed, `stages` props is empty !");
                                 return;
                             }
 
-                            // 开始执行步骤
-                            return PipelineRunnableStep::exec(app, &pipeline, props, steps, order);
+                            // 开始执行步骤 TODO
+                            // return PipelineRunnableStage::exec(app, &pipeline, props, stages, order);
                         }
 
                         Self::emit_error_response(app, "exec steps failed, `run` props is empty !")

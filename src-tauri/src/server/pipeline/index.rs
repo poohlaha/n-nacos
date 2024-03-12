@@ -7,9 +7,9 @@ use crate::exports::pipeline::QueryForm;
 use crate::helper::git::GitHandler;
 use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
-use crate::prepare::{get_error_response, get_success_response, HttpResponse};
+use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, PipelineBasic, PipelineCurrentRun, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
+use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
 use handlers::utils::Utils;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -108,8 +108,20 @@ impl Treat<HttpResponse> for Pipeline {
         // 当时运行流水线属性
         let mut current = PipelineCurrentRun::default();
         current.status = PipelineStatus::No; // 尚未运行
-        current.step = 0;
-        current.steps = pipeline.process_config.steps.clone();
+        current.stages = pipeline.process_config.stages.clone();
+
+        let mut steps: Vec<u32> = Vec::new();
+        if current.stages.len() > 0 {
+            let stage = current.stages.get(0);
+            if let Some(stage) = stage {
+                let groups = &stage.groups;
+                groups.iter().for_each(|group | {
+                    steps.push(0)
+                })
+            }
+        }
+
+        current.step = steps;
         run_variable.current = current;
         pipeline_clone.run = Some(run_variable);
 
@@ -401,9 +413,9 @@ impl Pipeline {
         }
 
         return ExtraVariable {
-            is_remote_url: GitHandler::is_remote_url(url),
             branches,
             h5: h5_extra_variables,
+            is_remote_url: GitHandler::is_remote_url(url),
         };
     }
 
@@ -411,12 +423,14 @@ impl Pipeline {
     fn get_h5_extra_variables(url: &str, installed_commands: Vec<String>, node: &str, branches: Vec<String>) -> Option<H5ExtraVariable> {
         let mut h5_extra_variables = H5FileHandler::get_default_file_commands(url);
         if let Some(h5_extra_variables) = h5_extra_variables.as_mut() {
+            h5_extra_variables.node = node.to_string();
             h5_extra_variables.installed_commands = installed_commands;
             return Some(h5_extra_variables.clone());
         }
 
         let mut h5_extra_variables = H5ExtraVariable::default();
         h5_extra_variables.node = node.to_string();
+        h5_extra_variables.installed_commands = installed_commands;
 
         // 根据 branches 获取所有的 package.json 或 Makefile 文件内容
         /*
@@ -437,5 +451,13 @@ impl Pipeline {
     /// 清空
     pub(crate) fn clear(server_id: &str) -> Result<HttpResponse, String> {
         Database::delete(PIPELINE_DB_NAME, &Self::get_pipeline_name(server_id))
+    }
+
+    /// 查询系统已安装的 commands 列表
+    pub(crate) fn query_os_commands() -> Result<HttpResponse, String> {
+        let h5_installed_commands = H5FileHandler::get_installed_commands();
+        get_success_response_by_value(OsCommands {
+            h5_installed_commands,
+        })
     }
 }
