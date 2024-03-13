@@ -5,21 +5,30 @@ pub(crate) mod stage;
 use crate::database::interface::Treat;
 use crate::error::Error;
 use crate::event::EventEmitter;
-use crate::prepare::{get_error_response, get_success_response, HttpResponse};
+use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineHistoryRun, PipelineRunProps, PipelineStatus};
+use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineHistoryRun, PipelineRunnableStageStep, PipelineRunProps, PipelineStage, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
-use crate::MAX_THREAD_COUNT;
+use crate::{MAX_THREAD_COUNT, POOLS};
 use handlers::utils::Utils;
-use log::info;
+use log::{error, info};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
+use lazy_static::lazy_static;
 use tauri::AppHandle;
+use crate::logger::pipeline::PipelineLogger;
+use crate::server::pipeline::languages::h5::H5FileHandler;
 
+// 共享 pipeline 数据
+lazy_static! {
+    static ref PIPELINE: Arc<Mutex<Option<Pipeline>>> = Arc::new(Mutex::new(None));
+}
 pub struct PipelineRunnable;
 
 impl PipelineRunnable {
-    pub(crate) fn exec(props: &PipelineRunProps, status: Option<PipelineStatus>) -> Result<HttpResponse, String> {
+
+    /// 添加到线程池中,需要过滤重复数据,以最后一条为主
+    pub(crate) fn exec(props: &PipelineRunProps) -> Result<HttpResponse, String> {
         if props.id.is_empty() {
             return Ok(get_error_response("运行流水线失败, `id` 不能为空"));
         }
@@ -32,8 +41,71 @@ impl PipelineRunnable {
         pipeline.id = props.id.clone();
         pipeline.server_id = props.server_id.clone();
 
-        let date = Utils::get_date(None);
-        Self::update_current_pipeline(&pipeline, props, true, status, Some(date.clone()), Some(props.clone()), None, Some(props.step), Some(props.branch.clone()), false)
+        // 插入到线程池
+        Self::insert_into_pool(props, &pipeline)?;
+
+        // 更改流水线状态为 `排队中`
+        Self::update_current_pipeline(
+            &pipeline,
+            props,
+            false,
+            Some(PipelineStatus::Queue),
+            None,
+            Some(props.clone()),
+            None,
+            Some(props.stage.clone()),
+            Some(props.branch.clone()),
+            false
+        )
+    }
+
+    /// 放入线程池
+    fn insert_into_pool(props: &PipelineRunProps, pipeline: &Pipeline) -> Result<(), String> {
+        info!("insert into pool: {:#?}", props);
+
+        let res = Pipeline::get_by_id(&pipeline)?;
+        let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+
+        let run = pipeline.run;
+        if run.is_none() {
+            let msg = "insert into pool failed, `run` prop is empty !";
+            error!("{}", msg);
+            return Err(Error::convert_string(msg));
+        }
+
+        let run = run.unwrap();
+        let current = run.current;
+        let stages = current.stages.clone();
+        if stages.is_empty() {
+            let msg = "insert into pool failed, `stages` prop is empty !";
+            error!("{}", msg);
+            return Err(Error::convert_string(msg));
+        }
+
+        let task = PipelineStageTask {
+            id: pipeline.id.clone(),
+            server_id: pipeline.server_id.clone(),
+            tag: pipeline.basic.tag.clone(),
+            stages: stages.clone(),
+            props: props.clone(),
+            order: current.order
+        };
+
+        // 放入线程池中, 覆盖重复数据
+        let mut pools = POOLS.lock().unwrap();
+
+        let mut list: Vec<PipelineStageTask> = Vec::new();
+        for item in pools.iter() {
+            if &item.id == &task.id && &item.server_id == &task.server_id {
+                list.push(task.clone())
+            } else {
+                list.push(item.clone())
+            }
+        }
+
+        *pools = list;
+        info!("insert into success !");
+        Ok(())
     }
 
     /// 保存当前流水线
@@ -45,7 +117,7 @@ impl PipelineRunnable {
         start_time: Option<String>,
         runnable: Option<PipelineRunProps>,
         duration: Option<u32>,
-        step: Option<u32>,
+        stage: Option<PipelineCurrentRunStage>,
         branch: Option<String>,
         insert_current_into_history: bool,
     ) -> Result<HttpResponse, String> {
@@ -59,6 +131,7 @@ impl PipelineRunnable {
                 let pipe = data.iter().find(|s| &s.id == &props.id);
                 if let Some(pipe) = pipe {
                     let mut pipeline = pipe.clone();
+
                     if let Some(start_time) = start_time.clone() {
                         pipeline.last_run_time = Some(start_time); // 最后运行时间
                     }
@@ -77,11 +150,6 @@ impl PipelineRunnable {
                             current.order = current.order + 1;
                         }
 
-                        // status
-                        if let Some(status) = status {
-                            current.status = status;
-                        }
-
                         // start_time
                         if let Some(start_time) = start_time {
                             current.start_time = start_time;
@@ -97,12 +165,15 @@ impl PipelineRunnable {
                             current.duration = duration;
                         }
 
-                        // step TODO
-                        /*
-                        if let Some(step) = step {
-                            current.step = step;
+                        // stage
+                        if let Some(stage) = stage {
+                            current.stage = stage;
                         }
-                         */
+
+                        // status
+                        if let Some(status) = status {
+                            current.stage.status = Some(status.clone());
+                        }
 
                         // branch
                         if let Some(branch) = branch {
@@ -147,6 +218,71 @@ impl PipelineRunnable {
 }
 
 impl PipelineRunnable {
+
+    /// 执行步骤
+    pub(crate) fn exec_pool_task(app: &AppHandle) {
+        let mut pools = POOLS.lock().unwrap();
+        if pools.is_empty() {
+            return
+        }
+
+        let installed_commands = H5FileHandler::get_installed_commands();
+
+        let app_cloned = Arc::new(app.clone());
+        let installed_commands_cloned = Arc::new(installed_commands.clone());
+        pools.par_iter().with_max_len(MAX_THREAD_COUNT as usize).for_each(|step| {
+            Self::exec_task_step(&*app_cloned, &*installed_commands_cloned, step);
+        });
+
+        let _ = pools.split_off(MAX_THREAD_COUNT as usize);
+    }
+
+    /// 执行步骤
+    pub(crate) fn exec_task_step(app: &AppHandle, installed_commands: &Vec<String>, stage: &PipelineStageTask) {
+        let mut pipeline = Pipeline::default();
+        pipeline.id = stage.id.clone();
+        pipeline.server_id = stage.server_id.clone();
+
+        // 更改状态为 `执行中` 、运行开始时间、序号
+        let status = PipelineStatus::Process;
+        let props = &stage.props;
+        let mut props_stage = props.stage.clone();
+        props_stage.status = Some(status.clone());
+
+        let start_time = Utils::get_date(None);
+        let res = Self::update_current_pipeline(
+            &pipeline,
+            props,
+            true,
+            Some(status.clone()),
+            Some(start_time),
+            None,
+            None,
+            Some(props_stage),
+            None,
+            false
+        );
+
+        let mut run_stage = PipelineCurrentRunStage::default();
+        run_stage.index = 1;
+        run_stage.status = Some(PipelineStatus::Failed);
+
+        if let Some(res) = res.clone().ok() {
+            let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+            if pipeline.is_empty() {
+                Self::exec_end_log(app, &pipeline, &props, Some(run_stage.clone()), false, "exec stages failed, `pipeline` prop is empty !", stage.order);
+                return ;
+            }
+
+            // 执行 stage
+            PipelineRunnableStage::exec(app, stage, &pipeline, installed_commands);
+            return
+        }
+
+        let msg = format!("exec stages failed, update pipeline error: {:#?} !", res.err());
+        Self::exec_end_log(app, &pipeline, &props, Some(run_stage.clone()), false, &msg, stage.order);
+    }
+
     /// 执行步骤
     pub(crate) fn exec_steps(app: &AppHandle, props: &PipelineRunProps, status: Option<PipelineStatus>, shared_data: Arc<Mutex<HttpResponse>>) {
         info!("begin to exec steps ...");
@@ -184,15 +320,14 @@ impl PipelineRunnable {
                         let run = pipeline.run.clone();
                         if let Some(run) = run {
                             let current = run.current.clone();
-                            let order = current.order;
                             let stages = current.stages;
                             if stages.is_empty() {
                                 Self::emit_error_response(app, "exec stages failed, `stages` props is empty !");
                                 return;
                             }
 
-                            // 开始执行步骤 TODO
-                            // return PipelineRunnableStage::exec(app, &pipeline, props, stages, order);
+                            // 开始执行步骤
+                            return PipelineRunnableStage::exec(props, stages);
                         }
 
                         Self::emit_error_response(app, "exec steps failed, `run` props is empty !")
@@ -213,6 +348,7 @@ impl PipelineRunnable {
 
 /// MARK: 并行任务
 impl PipelineRunnable {
+
     /// 批量执行
     pub(crate) fn batch_exec(app: &AppHandle, list: Vec<PipelineRunProps>) -> Result<Vec<HttpResponse>, String> {
         if list.is_empty() {
@@ -248,4 +384,73 @@ impl PipelineRunnable {
         info!("exec batch pipeline list success !");
         return Ok(Vec::new());
     }
+
+    /// 结束
+    pub(crate) fn exec_end_log(
+        app: &AppHandle,
+        pipeline: &Pipeline,
+        props: &PipelineRunProps,
+        stage: Option<PipelineCurrentRunStage>,
+        success: bool,
+        msg: &str,
+        order: u32
+    ) -> Option<Pipeline> {
+        let mut status: Option<PipelineStatus> = None;
+
+        let err = if success { "成功" } else { "失败" };
+
+        let msg = format!("{} {} !", msg, err);
+        Self::save_log(app, &msg, &pipeline.server_id, &pipeline.id, order);
+
+        // 成功, 更新 step, 更新状态
+        if success {
+            status = Some(PipelineStatus::Success)
+        } else {
+            status = Some(PipelineStatus::Failed)
+        }
+
+        // 更新流水线
+        let result = Self::update_stage(pipeline, props, stage, status);
+        return match result {
+            Ok(res) => {
+                EventEmitter::log_step_res(app, Some(get_success_response_by_value(res.clone()).unwrap()));
+                Some(res.clone())
+            }
+            Err(err) => {
+                Self::save_log(app, &err, &pipeline.server_id, &pipeline.id, order);
+                EventEmitter::log_step_res(app, Some(get_error_response(&err)));
+                None
+            }
+        };
+    }
+
+    /// 更新 stage 状态
+    pub(crate) fn update_stage(pipeline: &Pipeline, props: &PipelineRunProps, stage: Option<PipelineCurrentRunStage>, status: Option<PipelineStatus>) -> Result<Pipeline, String> {
+        if stage.is_none() && status.is_none() {
+            return Ok(pipeline.clone())
+        }
+
+        let res = PipelineRunnable::update_current_pipeline(
+            &pipeline,
+            props,
+            false,
+            status,
+            None,
+            None,
+            None,
+            stage,
+            None,
+            false
+        )?;
+
+        let pipe: Pipeline = serde_json::from_value(res.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        Ok(pipe)
+    }
+
+    /// 保存日志, 发送消息到前端
+    pub(crate) fn save_log(app: &AppHandle, msg: &str, server_id: &str, id: &str, order: u32) {
+        EventEmitter::log_event(app, msg);
+        PipelineLogger::save_log(msg, server_id, id, order);
+    }
+
 }

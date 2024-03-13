@@ -40,10 +40,10 @@ pub struct PipelineGroup {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineStep {
     pub(crate) id: String,
-    pub(crate) module: String,
+    pub(crate) module: PipelineCommandStatus,
     pub(crate) command: String,
     pub(crate) label: String,
-    pub(crate) status: PipelineCommandStatus,
+    pub(crate) status: PipelineStatus,
     pub(crate) components: Vec<PipelineStepComponent>
 }
 
@@ -223,14 +223,26 @@ pub struct PipelineRunVariable {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineCurrentRun {
     pub(crate) order: u32,               // 顺序
-    pub(crate) status: PipelineStatus,   // 运行状态
-    pub(crate) step: Vec<u32>,                // 运行到哪一步
+    pub(crate) stage: PipelineCurrentRunStage, // stage 运行到哪一步
     pub(crate) stages: Vec<PipelineStage>, // 构建过程
     #[serde(rename = "startTime")]
     pub(crate) start_time: String, // 开始时间
     pub(crate) duration: u32,            // 运行时长, 单位秒
     pub(crate) runnable: PipelineRunProps, // 运行时快照
     pub(crate) log: String,              // 日志, 根据 {server_id/id/order}.log 来读取
+}
+
+/// 当前流水线步骤
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineCurrentRunStage {
+    pub(crate) index: u32, // stage 运行到哪一步, 从 1 开始计算
+    #[serde(rename = "groupIndex")]
+    pub(crate) group_index: u32, // group 运行到哪一步, 从 0 开始计算
+    #[serde(rename = "stepIndex")]
+    pub(crate) step_index: u32, // step 运行到哪一步, 从 0 开始计算
+    #[serde(rename = "finishGroupCount")]
+    pub(crate) finish_group_count: u32, // stage 中运行完成 group 个数
+    pub(crate) status: Option<PipelineStatus>, // 运行状态
 }
 
 /// 历史运行流水线
@@ -249,7 +261,7 @@ pub struct PipelineRunProps {
     pub(crate) id: String, // 流水线ID,
     #[serde(rename = "serverId")]
     pub(crate) server_id: String, // 服务器ID,
-    pub(crate) step: u32,  // 步骤
+    pub(crate) stage: PipelineCurrentRunStage,  // stage
     pub(crate) tag: PipelineTag, // 流水线 Tag
     pub(crate) node: Option<String>, // nodeJs 版本号
     pub(crate) branch: String, // 分支
@@ -303,4 +315,27 @@ impl PipelineTag {
 pub struct OsCommands {
     #[serde(rename = "h5InstalledCommands")]
     pub(crate) h5_installed_commands: Vec<String>
+}
+
+/// 执行任务
+#[derive(Default, Debug, Clone)]
+pub struct PipelineStageTask {
+    pub(crate) id: String,
+    pub(crate) server_id: String,
+    pub(crate) tag: PipelineTag,
+    pub(crate) stages: Vec<PipelineStage>,
+    pub(crate) props: PipelineRunProps,
+    pub(crate) order: u32,
+}
+
+/// 执行 step
+#[derive(Default, Debug, Clone)]
+pub struct PipelineRunnableStageStep {
+    pub(crate) id: String,
+    pub(crate) server_id: String,
+    pub(crate) tag: PipelineTag,
+    pub(crate) stage_index: u32,
+    pub(crate) group_index: u32,
+    pub(crate) step_index: u32,
+    pub(crate) step: PipelineStep,
 }

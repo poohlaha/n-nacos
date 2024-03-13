@@ -77,7 +77,7 @@ pub fn exec_steps(app: AppHandle, props: PipelineRunProps) {
     let app_cloned = Arc::new(app.clone());
     let props_cloned = Arc::new(props.clone());
     async_std::task::spawn(async move {
-        log::info!("async_std task begin ...");
+        log::info!("start task pools ...");
         PipelineRunnable::exec_steps(&*app_cloned, &*props_cloned, None, Arc::new(Mutex::new(HttpResponse::default())))
     });
 }

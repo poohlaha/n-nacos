@@ -9,7 +9,7 @@ use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
+use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineCurrentRunStage, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
 use handlers::utils::Utils;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ pub struct Pipeline {
     pub(crate) basic: PipelineBasic, // 基本信息
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcessConfig, // 流程配置
-    pub(crate) status: PipelineStatus, // 变量
+    pub(crate) status: PipelineStatus, // 状态, 同步于 steps
     pub(crate) variables: Vec<PipelineVariable>, // 变量
     pub(crate) extra: Option<ExtraVariable>, // 额外的信息
     pub(crate) run: Option<PipelineRunVariable>, // 运行信息
@@ -107,21 +107,13 @@ impl Treat<HttpResponse> for Pipeline {
 
         // 当时运行流水线属性
         let mut current = PipelineCurrentRun::default();
-        current.status = PipelineStatus::No; // 尚未运行
+
+        // stage
+        let mut stage = PipelineCurrentRunStage::default();
+        stage.status = Some(PipelineStatus::No);
+
+        // stages
         current.stages = pipeline.process_config.stages.clone();
-
-        let mut steps: Vec<u32> = Vec::new();
-        if current.stages.len() > 0 {
-            let stage = current.stages.get(0);
-            if let Some(stage) = stage {
-                let groups = &stage.groups;
-                groups.iter().for_each(|group | {
-                    steps.push(0)
-                })
-            }
-        }
-
-        current.step = steps;
         run_variable.current = current;
         pipeline_clone.run = Some(run_variable);
 
@@ -460,4 +452,5 @@ impl Pipeline {
             h5_installed_commands,
         })
     }
+
 }
