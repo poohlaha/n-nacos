@@ -9,7 +9,6 @@
 
 ```shell
 make webInstall
-pnpm tauri dev
 ```
 
 ## 运行及构建
