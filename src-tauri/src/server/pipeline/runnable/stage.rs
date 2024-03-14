@@ -152,6 +152,7 @@ impl PipelineRunnableStage {
                 success_stage.group_index = last_step.group_index;
                 success_stage.step_index = last_step.step_index;
                 success_stage.finish_group_count = last_step.group_index;
+                success_stage.finished = true;
             }
         }
 
@@ -179,14 +180,18 @@ impl PipelineRunnableStage {
         info!("exec step stage: {:#?}", stage);
         info!("exec step: {:#?}", run_stage);
 
+        // 更新 step, 通知前端
+        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(run_stage.clone()), None)?;
+        EventEmitter::log_step_res(app, Some(get_success_response_by_value(pipeline.clone()).unwrap()));
+
         return match status {
             PipelineCommandStatus::None => Ok((false, None)),
-            PipelineCommandStatus::GitPull => Self::exec_step_git_pull(app, pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::H5Install => Self::exec_step_h5_install(app, pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Pack => Self::exec_step_pack(app, pipeline, props, installed_commands.clone(), stage, &run_stage, order),
-            PipelineCommandStatus::Compress => Self::exec_step_compress(app, pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Notice => Self::exec_step_notice(app, pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::GitPull => Self::exec_step_git_pull(app, &pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::H5Install => Self::exec_step_h5_install(app, &pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::Pack => Self::exec_step_pack(app, &pipeline, props, installed_commands.clone(), stage, &run_stage, order),
+            PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, props, stage, &run_stage, order),
         };
     }
 
@@ -216,11 +221,6 @@ impl PipelineRunnableStage {
 
         let server_id_cloned = Arc::new(pipeline.server_id.clone());
         let id_cloned = Arc::new(pipeline.id.clone());
-
-        // 更改运行中 Stage
-        let mut stage_clone = stage.clone();
-        stage_clone.status = Some(PipelineStatus::Process);
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(stage_clone), None)?;
 
         // 代码拉取
         let app_cloned = Arc::new(app.clone());
@@ -318,9 +318,6 @@ impl PipelineRunnableStage {
             }
         };
 
-        // 更新 Stage
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(stage.clone()), None)?;
-
         match tag {
             PipelineTag::None => {}
             PipelineTag::Develop => {}
@@ -341,9 +338,6 @@ impl PipelineRunnableStage {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
-
-        // 更新 Stage
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(stage.clone()), None)?;
 
         // result stage
         let mut result_stage = stage.clone();
@@ -424,9 +418,6 @@ impl PipelineRunnableStage {
                 info!("exec step deploy, get build dir: {}", build_dir);
             }
         }
-
-        // 更新 Stage
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(stage.clone()), None)?;
 
         let response = Server::get_by_id(&Server {
             id: pipeline.server_id.clone(),
@@ -689,9 +680,6 @@ impl PipelineRunnableStage {
             error!("{}", msg);
             return Err(Error::convert_string(msg));
         }
-
-        // 更新 Stage
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(stage.clone()), None)?;
 
         let server_id_cloned = Arc::new(pipeline.server_id.clone());
         let id_cloned = Arc::new(pipeline.id.clone());

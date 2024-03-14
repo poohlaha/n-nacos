@@ -241,6 +241,7 @@ pub struct PipelineCurrentRunStage {
     pub(crate) step_index: u32, // step 运行到哪一步, 从 0 开始计算
     #[serde(rename = "finishGroupCount")]
     pub(crate) finish_group_count: u32, // stage 中运行完成 group 个数
+    pub(crate) finished: bool, // 是否完成
     pub(crate) status: Option<PipelineStatus>, // 运行状态
 }
 
