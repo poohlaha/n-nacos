@@ -3,12 +3,11 @@
 use crate::database::interface::Treat;
 use crate::prepare::HttpResponse;
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineRunProps, PipelineStatus};
+use crate::server::pipeline::props::{PipelineRunProps};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::task::Task;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use tauri::AppHandle;
+use std::sync::{Arc};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct QueryForm {
@@ -67,26 +66,13 @@ pub async fn get_pipeline_detail(id: String, server_id: String) -> Result<HttpRe
 /// 运行流水线
 #[tauri::command]
 pub async fn pipeline_run(props: PipelineRunProps) -> Result<HttpResponse, String> {
-    Task::task_param(props.clone(), |pipeline| PipelineRunnable::exec(pipeline, Some(PipelineStatus::Process))).await
-}
-
-/// 启动异步线程运行步骤
-#[tauri::command]
-pub fn exec_steps(app: AppHandle, props: PipelineRunProps) {
-    // 执行异步任务, 运行流水线步骤
-    let app_cloned = Arc::new(app.clone());
-    let props_cloned = Arc::new(props.clone());
-    async_std::task::spawn(async move {
-        log::info!("start task pools ...");
-        PipelineRunnable::exec_steps(&*app_cloned, &*props_cloned, None, Arc::new(Mutex::new(HttpResponse::default())))
-    });
+    Task::task_param(props.clone(), |pipeline| PipelineRunnable::exec(pipeline)).await
 }
 
 /// 批量运行流水线
 #[tauri::command]
-pub async fn pipeline_batch_run(app: AppHandle, list: Vec<PipelineRunProps>) -> Result<Vec<HttpResponse>, String> {
-    let app_cloned = Arc::new(app.clone());
-    Task::task_batch_param(list, move |list| PipelineRunnable::batch_exec(&*app_cloned, list.clone())).await
+pub async fn pipeline_batch_run(list: Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
+    Task::task_batch_param(list, move |list| PipelineRunnable::batch_exec(list.clone())).await
 }
 
 /// 查询系统已安装的 commands 列表

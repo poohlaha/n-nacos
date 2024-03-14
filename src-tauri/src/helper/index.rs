@@ -1,6 +1,5 @@
 //! Helper handle
 
-use crate::event::EventEmitter;
 use crate::PROJECT_NAME;
 use handlers::file::FileHandler;
 use log::{error, info};
@@ -9,7 +8,6 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
-use tauri::AppHandle;
 
 pub struct Helper;
 
@@ -83,13 +81,12 @@ impl Helper {
     }
 
     /// 执行命令
-    pub(crate) fn exec_command<F>(app: &AppHandle, command: &str, current_dir: &str, func: F) -> bool
+    pub(crate) fn exec_command<F>(command: &str, current_dir: &str, func: F) -> bool
     where
         F: Fn(&str) + Send + Sync + 'static,
     {
         if command.is_empty() {
             let msg = "command is empty !";
-            EventEmitter::log_event(app, msg);
             func(&msg);
             return false;
         }
@@ -100,20 +97,20 @@ impl Helper {
         #[cfg(target_os = "windows")]
         {
             let msg = &format!("exec command: {}", _command);
-            EventEmitter::log_event(app, &msg);
             func(&msg);
             let child = Command::new("cmd").args(&["/C", &_command]).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
-            return Self::get_exec_command_real_time_output_by_spawn(app, child);
+            return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| {
+                func(&msg);
+            });
         }
 
         // linux|macos 通过 shell -c 执行多条命令: cd /usr/local/nginx/sbin/\n./nginx
         #[cfg(target_os = "macos")]
         {
             let msg = &format!("exec command: {}", _command);
-            EventEmitter::log_event(app, msg);
             func(&msg);
             let child = Command::new("sh").arg("-c").arg(command).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
-            return Self::get_exec_command_real_time_output_by_spawn(app, child, move |msg| {
+            return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| {
                 func(&msg);
             });
         }
@@ -121,37 +118,36 @@ impl Helper {
         #[cfg(target_os = "linux")]
         {
             let msg = &format!("exec command: {}", _command);
-            EventEmitter::log_event(app, msg);
             func(&msg);
             output = Command::new("sh").arg("-c").arg(command).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
-            return Self::get_exec_command_real_time_output_by_spawn(app, child);
+            return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| {
+                func(&msg);
+            });
         }
     }
 
     /// 实时输出日志
-    pub(crate) fn run_command_output_real_time<F>(app: &AppHandle, command: &str, args: &[&str], current_dir: &str, func: F) -> bool
+    pub(crate) fn run_command_output_real_time<F>(command: &str, args: &[&str], current_dir: &str, func: F) -> bool
     where
         F: Fn(&str) + Send + Sync + 'static,
     {
         let msg = format!("current dir: {}", current_dir);
-        EventEmitter::log_event(app, &msg);
         func(&msg);
 
         // 判断是不是有命令
         let command_installed = Self::check_installed_command(&command);
         if !command_installed {
             let msg = format!("os not install command: {}", command);
-            EventEmitter::log_event(app, &msg);
             func(&msg);
             return false;
         }
 
         let child = Command::new(command).args(args.iter()).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
-        return Self::get_exec_command_real_time_output_by_spawn(app, child, move |msg| func(msg));
+        return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| func(msg));
     }
 
     /// 通过 output 实时输出日志
-    pub(crate) fn get_exec_command_real_time_output_by_spawn<F>(app: &AppHandle, mut spawn: io::Result<Child>, func: F) -> bool
+    pub(crate) fn get_exec_command_real_time_output_by_spawn<F>(mut spawn: io::Result<Child>, func: F) -> bool
     where
         F: Fn(&str) + Send + 'static,
     {
@@ -159,7 +155,6 @@ impl Helper {
             Ok(child) => Some(child),
             Err(err) => {
                 let msg = format!("failed to get spawn, error: {:#?}", err);
-                EventEmitter::log_event(app, &msg);
                 func(&msg);
                 None
             }
@@ -174,14 +169,12 @@ impl Helper {
         let stderr = child.stderr.take();
         if stdout.is_none() {
             let msg = "failed to open stdout !";
-            EventEmitter::log_event(app, msg);
             func(&msg);
             return false;
         }
 
         if stderr.is_none() {
             let msg = "failed to open stderr !";
-            EventEmitter::log_event(app, msg);
             func(&msg);
             return false;
         }
@@ -192,8 +185,6 @@ impl Helper {
         let stderr_reader = BufReader::new(stderr);
         // let has_error = Arc::new(Mutex::new(false));
         // let has_error_clone = has_error.clone();
-        let app_cloned = Arc::new(app.clone());
-        let app_cloned2 = Arc::new(app.clone());
 
         let func_cloned = Arc::new(Mutex::new(func));
         let func_clone = func_cloned.clone();
@@ -203,7 +194,6 @@ impl Helper {
         let stdout_thread = thread::spawn(move || {
             for line in stdout_reader.lines() {
                 if let Ok(line) = line {
-                    EventEmitter::log_event(&*app_cloned, &line);
                     let func = func_cloned.lock().unwrap();
                     (*func)(&line);
                 }
@@ -221,7 +211,6 @@ impl Helper {
                         *error = true
                     }
                      */
-                    EventEmitter::log_event(&*app_cloned2, &line);
                     let func = func_clone.lock().unwrap();
                     (*func)(&line);
                 }
@@ -233,7 +222,6 @@ impl Helper {
             Ok(status) => Some(status),
             Err(err) => {
                 let msg = format!("failed to wait spawn finished, error: {:#?}", err);
-                EventEmitter::log_event(app, &msg);
                 let func = func_new_clone.lock().unwrap();
                 (*func)(&msg);
                 None
@@ -249,7 +237,6 @@ impl Helper {
             Ok(_) => {}
             Err(err) => {
                 let msg = format!("failed to wait stdout thread finished, error: {:#?}", err);
-                EventEmitter::log_event(app, &msg);
                 let func = func_new_clone.lock().unwrap();
                 (*func)(&msg);
             }
@@ -259,7 +246,6 @@ impl Helper {
             Ok(_) => {}
             Err(err) => {
                 let msg = format!("failed to wait stderr thread finished, error: {:#?}", err);
-                EventEmitter::log_event(app, &msg);
                 let func = func_new_clone.lock().unwrap();
                 (*func)(&msg);
             }

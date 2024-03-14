@@ -22,7 +22,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::system::tray::Tray;
-use exports::pipeline::{delete_pipeline, exec_steps, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, update_pipeline, query_os_commands};
+use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, update_pipeline, query_os_commands};
 use crate::server::pipeline::props::{PipelineStageTask};
 use crate::server::pipeline::runnable::PipelineRunnable;
 
@@ -43,9 +43,10 @@ fn init(app: &AppHandle) {
     ThreadPoolBuilder::new().num_threads(MAX_THREAD_COUNT as usize).build_global().unwrap();
 
     // 启动线程来执行线程池中任务
-    thread::spawn(|| {
+    let app_cloned = Arc::new(app.clone());
+    thread::spawn(move || {
         loop {
-            PipelineRunnable::exec_pool_task(&app);
+            PipelineRunnable::exec_pool_task(&*app_cloned);
             thread::sleep(Duration::from_secs(LOOP_SEC));
         }
     });
@@ -59,9 +60,10 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .setup(move |app| {
-            let app_handle = app.handle();
             // 创建系统托盘
             Tray::builder(app);
+
+            let app_handle = app.handle();
 
             // 初始化
             init(app_handle);
@@ -81,7 +83,6 @@ fn main() {
             get_pipeline_detail,
             pipeline_run,
             query_os_commands,
-            exec_steps,
             pipeline_batch_run,
             start_monitor,
             stop_monitor,

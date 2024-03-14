@@ -6,7 +6,6 @@ use crate::helper::git::pull::{GitConfig, GitHelper};
 use git2::{BranchType, Repository};
 use log::info;
 use std::process::Command;
-use tauri::AppHandle;
 
 pub struct GitHandler;
 
@@ -188,10 +187,10 @@ impl GitHandler {
 
 impl GitHandler {
     /// 代码拉取
-    pub(crate) fn pull<F>(app: &AppHandle, config: &GitConfig, func: F) -> Result<bool, String>
+    pub(crate) fn pull<F>(config: &GitConfig, func: F) -> Result<bool, String>
     where
         F: Fn(&str) + Send + Sync + 'static,
     {
-        GitHelper::pull(app, config, func)
+        GitHelper::pull(config, func)
     }
 }

@@ -31,10 +31,10 @@ impl Task {
     }
 
     /// 批量异步任务
-    pub(crate) async fn task_batch_param<T, F>(body: T, func: F) -> Result<Vec<HttpResponse>, String>
+    pub(crate) async fn task_batch_param<T, F>(body: T, func: F) -> Result<HttpResponse, String>
     where
         T: DeserializeOwned + Serialize + Clone + Send + Sync + 'static,
-        F: FnOnce(&T) -> Result<Vec<HttpResponse>, String> + Send + 'static,
+        F: FnOnce(&T) -> Result<HttpResponse, String> + Send + 'static,
     {
         let body_cloned = Arc::new(body.clone());
         let result = async_std::task::spawn(async move { func(&*body_cloned) });

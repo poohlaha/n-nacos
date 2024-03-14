@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineHistoryRun, PipelineRunnableStageStep, PipelineRunProps, PipelineStage, PipelineStageTask, PipelineStatus};
+use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineHistoryRun, PipelineRunProps, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 use crate::{MAX_THREAD_COUNT, POOLS};
 use handlers::utils::Utils;
@@ -263,82 +263,25 @@ impl PipelineRunnable {
             false
         );
 
-        let mut run_stage = PipelineCurrentRunStage::default();
-        run_stage.index = 1;
-        run_stage.status = Some(PipelineStatus::Failed);
+        let mut error_stage = PipelineCurrentRunStage::default();
+        error_stage.index = 1;
+        error_stage.status = Some(PipelineStatus::Failed);
 
         if let Some(res) = res.clone().ok() {
-            let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
-            if pipeline.is_empty() {
-                Self::exec_end_log(app, &pipeline, &props, Some(run_stage.clone()), false, "exec stages failed, `pipeline` prop is empty !", stage.order);
+            let pipe: Result<Pipeline, String> = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string());
+            if pipe.is_err() {
+                Self::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, "exec stages failed, `pipeline` prop is empty !", stage.order);
                 return ;
             }
 
             // 执行 stage
-            PipelineRunnableStage::exec(app, stage, &pipeline, installed_commands);
+            let pipe = pipe.unwrap();
+            PipelineRunnableStage::exec(app, stage, &pipe, installed_commands);
             return
         }
 
-        let msg = format!("exec stages failed, update pipeline error: {:#?} !", res.err());
-        Self::exec_end_log(app, &pipeline, &props, Some(run_stage.clone()), false, &msg, stage.order);
-    }
-
-    /// 执行步骤
-    pub(crate) fn exec_steps(app: &AppHandle, props: &PipelineRunProps, status: Option<PipelineStatus>, shared_data: Arc<Mutex<HttpResponse>>) {
-        info!("begin to exec steps ...");
-        let mut pipeline = Pipeline::default();
-        pipeline.id = props.id.clone();
-        pipeline.server_id = props.server_id.clone();
-
-        let mut guard = shared_data.lock().unwrap();
-        let data = Pipeline::get_by_id(&pipeline);
-
-        // 更改状态
-        if let Some(status) = status {
-            let result: Result<HttpResponse, String> = PipelineRunnable::update_current_pipeline(&pipeline, props, false, Some(status), None, None, None, None, None, false);
-
-            let flag = match result {
-                Ok(_) => true,
-                Err(err) => {
-                    info!("update pipeline status error: {}", &err);
-                    false
-                }
-            };
-
-            if !flag {
-                return;
-            }
-        }
-
-        match data {
-            Ok(res) => {
-                *guard = res;
-                let res_clone = guard.clone();
-                let data: Result<Pipeline, String> = serde_json::from_value(res_clone.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string());
-                match data {
-                    Ok(pipeline) => {
-                        let run = pipeline.run.clone();
-                        if let Some(run) = run {
-                            let current = run.current.clone();
-                            let stages = current.stages;
-                            if stages.is_empty() {
-                                Self::emit_error_response(app, "exec stages failed, `stages` props is empty !");
-                                return;
-                            }
-
-                            // 开始执行步骤
-                            return PipelineRunnableStage::exec(props, stages);
-                        }
-
-                        Self::emit_error_response(app, "exec steps failed, `run` props is empty !")
-                    }
-                    Err(err) => Self::emit_error_response(app, &format!("exec steps error: {}", &err)),
-                }
-            }
-            Err(err) => Self::emit_error_response(app, &format!("exec steps error: {}", &err)),
-        }
-
-        info!("exec steps end ...");
+        let msg = format!("update pipeline error: {:#?}, exec task step ", res.err());
+        Self::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, &msg, stage.order);
     }
 
     fn emit_error_response(app: &AppHandle, err: &str) {
@@ -350,39 +293,38 @@ impl PipelineRunnable {
 impl PipelineRunnable {
 
     /// 批量执行
-    pub(crate) fn batch_exec(app: &AppHandle, list: Vec<PipelineRunProps>) -> Result<Vec<HttpResponse>, String> {
+    pub(crate) fn batch_exec(list: Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
         if list.is_empty() {
-            return Err(Error::convert_string("batch exec pipeline list failed, `list` is empty !"));
+            error!("batch exec pipeline list failed, `list` is empty !");
+            return Ok(get_error_response("batch exec pipeline list failed, `list` is empty !"));
         }
+
 
         let mut result_errors: Vec<HttpResponse> = Vec::new(); // 错误
         let mut result: Vec<PipelineRunProps> = Vec::new();
 
+        // 插入到线程池
         list.iter().for_each(|props| {
-            match Self::exec(props, Some(PipelineStatus::Queue)) {
+            match Self::exec(props) {
                 Ok(_) => result.push(props.clone()),
                 Err(err) => {
-                    info!("exec pipeline id: {} error: {}", &props.id, &err);
+                    error!("exec pipeline id: {} error: {}", &props.id, &err);
                     result_errors.push(get_error_response(&err))
                 }
             };
         });
 
         if result.is_empty() {
-            info!("exec pipeline list failed, no data need to batch run !");
-            return Ok(Vec::new());
+            error!("exec pipeline list failed, no data need to batch run !");
+            return Ok(get_error_response("exec pipeline list failed, no data need to batch run !"));
         }
 
-        info!("exec batch pipeline list ...");
-        let shared_data: Arc<Mutex<HttpResponse>> = Arc::new(Mutex::new(HttpResponse::default()));
-        let app_cloned = Arc::new(app.clone());
+        if !result_errors.is_empty() {
+            return Ok(get_success_response(Some(serde_json::Value::String(String::from("some pipeline into pools error !")))));
+        }
 
-        result.par_iter().with_max_len(MAX_THREAD_COUNT as usize).for_each(|props| {
-            Self::exec_steps(&*app_cloned, props, Some(PipelineStatus::Process), Arc::clone(&shared_data));
-        });
-
-        info!("exec batch pipeline list success !");
-        return Ok(Vec::new());
+        info!("insert into pools success !");
+        return Ok(get_success_response(None));
     }
 
     /// 结束
@@ -395,7 +337,7 @@ impl PipelineRunnable {
         msg: &str,
         order: u32
     ) -> Option<Pipeline> {
-        let mut status: Option<PipelineStatus> = None;
+        let status: Option<PipelineStatus>;
 
         let err = if success { "成功" } else { "失败" };
 
