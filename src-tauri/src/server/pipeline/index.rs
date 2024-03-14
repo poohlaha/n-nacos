@@ -181,6 +181,13 @@ impl Treat<HttpResponse> for Pipeline {
                 line.variables = pipeline.variables.clone();
                 line.process_config = pipeline.process_config.clone();
 
+                if let Some(mut run) = line.run.clone() {
+                    let mut current = run.current.clone();
+                    current.stages = pipeline.process_config.stages.clone();
+                    run.current = current;
+                    line.run = Some(run.clone());
+                }
+
                 Self::update_pipeline(data, &line)
             }
             Err(_) => Ok(get_error_response("更新流水线失败")),
@@ -235,7 +242,7 @@ impl Treat<HttpResponse> for Pipeline {
             return Ok(get_error_response("根据 ID 查找流水线失败, `server_id` 不能为空"));
         }
 
-        info!("delete pipeline id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
+        info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
         let data = Self::get_pipeline_list(&pipeline);
         return match data {
             Ok(data) => {
@@ -448,9 +455,6 @@ impl Pipeline {
     /// 查询系统已安装的 commands 列表
     pub(crate) fn query_os_commands() -> Result<HttpResponse, String> {
         let h5_installed_commands = H5FileHandler::get_installed_commands();
-        get_success_response_by_value(OsCommands {
-            h5_installed_commands,
-        })
+        get_success_response_by_value(OsCommands { h5_installed_commands })
     }
-
 }

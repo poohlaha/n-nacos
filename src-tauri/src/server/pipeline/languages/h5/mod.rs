@@ -228,6 +228,6 @@ impl H5FileHandler {
             });
         }
 
-        return display_fields
+        return display_fields;
     }
 }

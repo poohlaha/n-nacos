@@ -3,11 +3,11 @@
 use crate::database::interface::Treat;
 use crate::prepare::HttpResponse;
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineRunProps};
+use crate::server::pipeline::props::PipelineRunProps;
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::task::Task;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc};
+use std::sync::Arc;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct QueryForm {
@@ -80,4 +80,3 @@ pub async fn pipeline_batch_run(list: Vec<PipelineRunProps>) -> Result<HttpRespo
 pub async fn query_os_commands() -> Result<HttpResponse, String> {
     Task::task(|| Pipeline::query_os_commands()).await
 }
-

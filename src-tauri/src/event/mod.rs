@@ -15,6 +15,9 @@ const PIPELINE_EXEC_STEP_LOG_EVENT_NAME: &str = "pipeline_exec_step_log";
 /// 流水线运行步骤结果事件名称
 const PIPELINE_EXEC_STEP_RES_EVENT_NAME: &str = "pipeline_exec_step_response";
 
+/// 流水线运行步骤发送通知事件名称
+const PIPELINE_EXEC_STEP_NOTICE_RES_EVENT_NAME: &str = "pipeline_exec_step_notice";
+
 /// 监控结果事件名称
 const MONITOR_RES_EVENT_NAME: &str = "monitor_response";
 
@@ -74,8 +77,15 @@ impl EventEmitter {
             }
         }
 
-        // monitor result
+        // step notice
         if index == 3 {
+            if let Some(response) = response.clone() {
+                Self::emit_response(app, PIPELINE_EXEC_STEP_NOTICE_RES_EVENT_NAME, response)
+            }
+        }
+
+        // monitor result
+        if index == 4 {
             if let Some(response) = response.clone() {
                 Self::emit_response(app, MONITOR_RES_EVENT_NAME, response)
             }
@@ -100,9 +110,15 @@ impl EventEmitter {
         EventEmitter::emit(app, EventSendParams { response, msg: String::new() }, 2);
     }
 
+    /// 发送步骤通知
+    pub(crate) fn log_step_notice(app: &AppHandle, response: Option<HttpResponse>) {
+        info!("send run step notice");
+        EventEmitter::emit(app, EventSendParams { response, msg: String::new() }, 3);
+    }
+
     /// 发送监控结果
     pub(crate) fn log_monitor_res(app: &AppHandle, response: Option<HttpResponse>) {
         info!("send monitor response");
-        EventEmitter::emit(app, EventSendParams { response, msg: String::new() }, 3);
+        EventEmitter::emit(app, EventSendParams { response, msg: String::new() }, 4);
     }
 }

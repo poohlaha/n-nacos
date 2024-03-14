@@ -1,10 +1,10 @@
 //! 对外接口
 
+use crate::error::Error;
 use log::info;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use crate::error::Error;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct HttpResponse {
@@ -28,7 +28,7 @@ pub(crate) fn get_success_response(body: Option<serde_json::Value>) -> HttpRespo
 
 pub(crate) fn get_success_response_by_value<T>(body: T) -> Result<HttpResponse, String>
 where
-    T: Serialize + DeserializeOwned
+    T: Serialize + DeserializeOwned,
 {
     let data = serde_json::to_value(&body).map_err(|err| Error::Error(err.to_string()).to_string())?;
     Ok(HttpResponse { code: 200, body: data, error: String::new() })
