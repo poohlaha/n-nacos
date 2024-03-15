@@ -17,40 +17,43 @@ use rayon::ThreadPoolBuilder;
 
 use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::server::pipeline::props::PipelineStageTask;
-use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::system::tray::Tray;
 use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use tauri::AppHandle;
+use crate::server::pipeline::pool::Pool;
 
 const PROJECT_NAME: &str = "n-nacos";
 
 pub(crate) const MAX_THREAD_COUNT: u32 = 2;
-pub(crate) const LOOP_SEC: u64 = 5;
+pub(crate) const LOOP_SEC: u64 = 50;
 
 // 定义全局 线程池
 lazy_static! {
     static ref POOLS: Arc<Mutex<Vec<PipelineStageTask>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
-// 日志目录: /Users/xxx/Library/Logs/n-nacos-reporter
-// 程序配置目录: /Users/xxx/Library/Application Support/n-nacos
 /// 初始化一些属性
 fn init(app: &AppHandle) {
+    // 设置并行任务最大数
     ThreadPoolBuilder::new().num_threads(MAX_THREAD_COUNT as usize).build_global().unwrap();
+
+    // 从数据库读取任务
+    Pool::get_pools();
 
     // 启动线程来执行线程池中任务
     let app_cloned = Arc::new(app.clone());
     thread::spawn(move || loop {
-        info!("loop pools ...");
-        PipelineRunnable::exec_pool_task(&*app_cloned);
-        thread::sleep(Duration::from_secs(LOOP_SEC));
+        info!("loop pipeline pools ...");
+        Pool::start(&*app_cloned);
     });
 }
+
+// 日志目录: /Users/xxx/Library/Logs/n-nacos
+// 程序配置目录: /Users/xxx/Library/Application Support/n-nacos
 fn main() {
     // tauri
     tauri::Builder::default()

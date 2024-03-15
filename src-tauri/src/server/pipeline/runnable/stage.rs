@@ -10,7 +10,7 @@ use crate::prepare::{convert_res, get_error_response, get_success_response_by_va
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineCurrentRunStage, PipelineRunProps, PipelineRunnableStageStep, PipelineSelectedVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag, PipelineBasic};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineCurrentRunStage, PipelineRunProps, PipelineRunnableStageStep, PipelineSelectedVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
 use sftp::config::{Upload};
@@ -177,8 +177,6 @@ impl PipelineRunnableStage {
         run_stage.index = stage.stage_index;
         run_stage.group_index = stage.group_index;
         run_stage.step_index = stage.step_index;
-        info!("exec step stage: {:#?}", stage);
-        info!("exec step: {:#?}", run_stage);
 
         // 更新 step, 通知前端
         let pipeline = PipelineRunnable::update_stage(pipeline, props, Some(run_stage.clone()), None)?;
@@ -205,9 +203,7 @@ impl PipelineRunnableStage {
         if !GitHandler::is_remote_url(&basic.path) {
             let mut result_stage = stage.clone();
             result_stage.status = Some(PipelineStatus::Success);
-            info!("update result stage pipeline: {:#?}", result_stage);
-            let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), true, &format!("{} not a remote project, pull {} ", &pack_name, &basic.path), order, None);
-            info!("update result stage pipeline after: {:#?}", pipe);
+            PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), true, &format!("{} not a remote project, pull {} ", &pack_name, &basic.path), order, None);
             return Ok((true, Some(pipeline.clone())));
         }
 
@@ -231,10 +227,8 @@ impl PipelineRunnableStage {
         // result stage
         let mut result_stage = stage.clone();
         result_stage.status = if success { Some(PipelineStatus::Success) } else { Some(PipelineStatus::Failed) };
-        info!("update result stage pipeline: {:#?}", result_stage);
 
         let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), success, &format!("{} pull {} ", &pack_name, &basic.path), order, None);
-        info!("update result stage pipeline after: {:#?}", pipe);
         if pipe.is_none() {
             return Ok((false, None));
         }
@@ -402,7 +396,7 @@ impl PipelineRunnableStage {
         } else {
             let basic = &pipeline.basic;
             let project_name = GitHandler::get_project_name_by_git(&basic.path);
-            let mut project_dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
+            let project_dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
                 Ok(dir) => {
                     dir
                 }
@@ -467,20 +461,16 @@ impl PipelineRunnableStage {
                 // result stage
                 let mut result_stage = stage.clone();
                 result_stage.status = Some(PipelineStatus::Success);
-                info!("update result stage pipeline: {:#?}", result_stage);
 
                 let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), true, &format!("{}", pack_name), order, None);
-                info!("update result stage pipeline after: {:#?}", pipe);
                 return Ok((true, pipe));
             }
             Err(err) => {
                 // result stage
                 let mut result_stage = stage.clone();
                 result_stage.status = Some(PipelineStatus::Failed);
-                info!("update result stage pipeline: {:#?}", result_stage);
 
-                let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, &format!("deploy error: {}, {}", err, pack_name), order, Some(PipelineStatus::Failed));
-                info!("update result stage pipeline after: {:#?}", pipe);
+                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, &format!("deploy error: {}, {}", err, pack_name), order, Some(PipelineStatus::Failed));
                 return Ok((false, None));
             }
         }
@@ -571,9 +561,7 @@ impl PipelineRunnableStage {
                     status = Some(PipelineStatus::Failed)
                 }
 
-                info!("update result stage pipeline: {:#?}", get_result_stage(success));
                 let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(get_result_stage(success)), success, &format!("{}", pack_name), order, status);
-                info!("update result stage pipeline after: {:#?}", pipe);
                 if pipe.is_none() {
                     return Ok((false, None));
                 }
@@ -674,7 +662,7 @@ impl PipelineRunnableStage {
             return Err(Error::convert_string(&msg));
         }
 
-        let (cmds, _) = Self::get_h5_install_cmd(project_path.clone(), project_name)?;
+        let (cmds, _) = Self::get_h5_install_cmd(app, project_path.clone(), project_name, &pipeline.server_id, &pipeline.id, order)?;
         if cmds.is_empty() {
             let msg = "can not found any commands in os !";
             error!("{}", msg);
@@ -693,7 +681,6 @@ impl PipelineRunnableStage {
         // result stage
         let mut result_stage = stage.clone();
         result_stage.status = if success { Some(PipelineStatus::Success) } else { Some(PipelineStatus::Failed) };
-        info!("update result stage pipeline: {:#?}", result_stage);
 
         let mut status: Option<PipelineStatus> = None;
         if !success {
@@ -701,7 +688,6 @@ impl PipelineRunnableStage {
         }
 
         let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), success, &format!("{} install h5 project {:#?} ", &pack_name, project_path), order, status);
-        info!("update result stage pipeline after: {:#?}", pipe);
         if pipe.is_none() {
             return Ok((false, None));
         }
@@ -714,7 +700,7 @@ impl PipelineRunnableStage {
     }
 
     /// 获取 H5 安装的命令，动态智能判断
-    fn get_h5_install_cmd(project_path: PathBuf, project_name: &str) -> Result<(Vec<String>, String), String> {
+    fn get_h5_install_cmd(app: &AppHandle, project_path: PathBuf, project_name: &str, server_id: &str, id: &str, order: u32) -> Result<(Vec<String>, String), String> {
         let installed_commands = H5FileHandler::get_installed_commands();
         if installed_commands.is_empty() {
             let msg = "`yarn`、`pnpm`、`cnpm`、`npm` not found in the os !";
@@ -735,12 +721,15 @@ impl PipelineRunnableStage {
         let mut path = project_path.clone();
         path.set_file_name(files.get(0).unwrap());
         if path.exists() {
-            info!("project {} have `pnpm-lock.yaml`, use `pnpm install`", project_name);
+            Self::send_log(app, &format!("project {} have `pnpm-lock.yaml`, use `pnpm install`", project_name), server_id, id, order);
+
             // 判断是否安装了 pnpm
             if !installed_commands.contains(&H5_INSTALLED_CMDS[2].to_string()) {
+                Self::send_log(app, &format!("os not install {}, it will be installed !", H5_INSTALLED_CMDS[2]), server_id, id, order);
                 cmds.push(format!("npm install -g {}", H5_INSTALLED_CMDS[2]));
             }
 
+            Self::send_log(app, &format!("run `{} install`", H5_INSTALLED_CMDS[2]), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[2]));
             return Ok((cmds, H5_INSTALLED_CMDS[2].to_string()));
         }
@@ -749,12 +738,15 @@ impl PipelineRunnableStage {
         let mut path = project_path.clone();
         path.push(files.get(1).unwrap());
         if path.exists() {
-            info!("project {} have `yarn.lock`, use `yarn install`", project_name);
+            Self::send_log(app, &format!("project {} have `yarn.lock`, use `yarn install`", project_name), server_id, id, order);
+
             // 判断是否安装了 yarn
             if !installed_commands.contains(&H5_INSTALLED_CMDS[1].to_string()) {
+                Self::send_log(app, &format!("os not install {}, it will be installed !", H5_INSTALLED_CMDS[1]), server_id, id, order);
                 cmds.push(format!("npm install -g {}", H5_INSTALLED_CMDS[1]));
             }
 
+            Self::send_log(app, &format!("run `{} install`", H5_INSTALLED_CMDS[1]), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[1]));
             return Ok((cmds, H5_INSTALLED_CMDS[1].to_string()));
         }
@@ -763,12 +755,15 @@ impl PipelineRunnableStage {
         let mut path = project_path.clone();
         path.push(files.get(2).unwrap());
         if path.exists() {
-            info!("project {} have `package-lock.json`, use `cnpm install`", project_name);
+            Self::send_log(app, &format!("project {} have `package-lock.json`, use `cnpm install`", project_name), server_id, id, order);
+
             // 判断是否安装了 cnpm
             if !installed_commands.contains(&H5_INSTALLED_CMDS[3].to_string()) {
+                Self::send_log(app, &format!("os not install {}, it will be installed !", H5_INSTALLED_CMDS[3]), server_id, id, order);
                 cmds.push(format!("npm install -g {}", H5_INSTALLED_CMDS[3]));
             }
 
+            Self::send_log(app, &format!("run `{} install`", H5_INSTALLED_CMDS[3]), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[3]));
             return Ok((cmds, H5_INSTALLED_CMDS[3].to_string()));
         }
@@ -777,42 +772,39 @@ impl PipelineRunnableStage {
         let mut path = project_path.clone();
         path.push(".npmrc");
         if path.exists() {
-            info!("project {} have `.npmrc`, use `pnpm install`", project_name);
+            Self::send_log(app, &format!("project {} have `.npmrc`, use `pnpm install`", project_name), server_id, id, order);
+
             // 判断是否安装了 pnpm
             if !installed_commands.contains(&H5_INSTALLED_CMDS[2].to_string()) {
+                Self::send_log(app, &format!("os not install {}, it will be installed !", H5_INSTALLED_CMDS[2]), server_id, id, order);
                 cmds.push(format!("npm install -g {}", H5_INSTALLED_CMDS[2]));
             }
 
+            Self::send_log(app, &format!("run `{} install`", H5_INSTALLED_CMDS[2]), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[2]));
             return Ok((cmds, H5_INSTALLED_CMDS[2].to_string()));
         }
 
         // 3. 动态智能判断, 判断 cnpm yarn npm
         if installed_commands.contains(&H5_INSTALLED_CMDS[3].to_string()) {
-            info!("project {} dynamic use `cnpm install`", project_name);
+            Self::send_log(app, &format!("project {} dynamic use `cnpm install`", project_name), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[3]));
             return Ok((cmds, H5_INSTALLED_CMDS[3].to_string()));
         }
 
         if installed_commands.contains(&H5_INSTALLED_CMDS[1].to_string()) {
-            info!("project {} dynamic use `yarn install`", project_name);
+            Self::send_log(app, &format!("project {} dynamic use `yarn install`", project_name), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[1]));
             return Ok((cmds, H5_INSTALLED_CMDS[1].to_string()));
         }
 
         if installed_commands.contains(&H5_INSTALLED_CMDS[0].to_string()) {
-            info!("project {} dynamic use `npm install`", project_name);
+            Self::send_log(app, &format!("project {} dynamic npm `yarn install`", project_name), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[0]));
             return Ok((cmds, H5_INSTALLED_CMDS[0].to_string()));
         }
 
         Ok((cmds, String::new()))
-    }
-
-    /// 发送错误消息
-    fn send_error_msg(app: &AppHandle, msg: &str) -> Result<(), String> {
-        PipelineRunnable::emit_error_response(app, msg);
-        return Err(Error::convert_string(msg));
     }
 
     /// 从选中的 variables 取值
@@ -862,5 +854,11 @@ impl PipelineRunnableStage {
         }
 
         Ok(dir)
+    }
+
+    /// 发送日志
+    fn send_log(app: &AppHandle, msg: &str, server_id: &str, id: &str, order: u32) {
+        info!("{}", &msg);
+        PipelineRunnable::save_log(app, &msg, server_id, id, order);
     }
 }

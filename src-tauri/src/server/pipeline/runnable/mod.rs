@@ -8,16 +8,13 @@ use crate::event::EventEmitter;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineHistoryRun, PipelineRunProps, PipelineStageTask, PipelineStatus};
-use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
-use crate::{MAX_THREAD_COUNT, POOLS};
-use handlers::utils::Utils;
+use crate::{POOLS};
 use lazy_static::lazy_static;
 use log::{error, info};
-use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
+use crate::server::pipeline::pool::Pool;
 
 // 共享 pipeline 数据
 lazy_static! {
@@ -42,6 +39,10 @@ impl PipelineRunnable {
 
         // 插入到线程池
         Self::insert_into_pool(props, &pipeline)?;
+
+        // 更新线程池数据库
+        let mut pools = POOLS.lock().unwrap();
+        Pool::update(pools.clone())?;
 
         // 更改流水线状态为 `排队中`
         Self::update_current_pipeline(&pipeline, props, false, Some(PipelineStatus::Queue), None, Some(props.clone()), None, Some(props.stage.clone()), Some(props.branch.clone()), false)
@@ -82,14 +83,19 @@ impl PipelineRunnable {
 
         // 放入线程池中, 覆盖重复数据
         let mut pools = POOLS.lock().unwrap();
-        if pools.is_empty() {
+        let mut has_found = false;
+        for item in pools.iter_mut() {
+            if &item.id == &task.id && &item.server_id == &task.server_id {
+                *item = task.clone(); // 存在则替换
+                has_found = true;
+            }
+        }
+
+        if !has_found {
+            info!("task not found in pool, it will be added !");
             pools.push(task)
         } else {
-            for item in pools.iter_mut() {
-                if &item.id == &task.id && &item.server_id == &task.server_id {
-                    *item = task.clone(); // 存在则替换
-                }
-            }
+            info!("task has found in pool, it will be replaced !");
         }
 
         info!("pools task list: {:#?}", pools);
@@ -98,7 +104,7 @@ impl PipelineRunnable {
     }
 
     /// 保存当前流水线
-    fn update_current_pipeline(
+    pub(crate) fn update_current_pipeline(
         pipeline: &Pipeline,
         props: &PipelineRunProps,
         update_order: bool,
@@ -206,74 +212,6 @@ impl PipelineRunnable {
     }
 }
 
-impl PipelineRunnable {
-    /// 执行步骤
-    pub(crate) fn exec_pool_task(app: &AppHandle) {
-        info!("exec pool task ...");
-        let mut pools = POOLS.lock().unwrap();
-        if pools.is_empty() {
-            info!("pool is empty !");
-            return;
-        }
-
-        // 取出 MAX_THREAD_COUNT 条数据
-        let len = pools.len().min(MAX_THREAD_COUNT as usize); // 取 pools 的长度和 5 的最小值
-        info!("exec len: {:#?}", len);
-        let tasks: Vec<PipelineStageTask> = pools.drain(0..len).collect();
-        info!("exec tasks: {:#?}", tasks);
-        info!("pools list: {:#?}", pools);
-        let installed_commands = H5FileHandler::get_installed_commands();
-
-        let app_cloned = Arc::new(app.clone());
-        let installed_commands_cloned = Arc::new(installed_commands.clone());
-        tasks.par_iter().with_max_len(MAX_THREAD_COUNT as usize).for_each(|step| {
-            Self::exec_task_step(&*app_cloned, &*installed_commands_cloned, step);
-        });
-
-        info!("exec pool task end !");
-    }
-
-    /// 执行步骤
-    pub(crate) fn exec_task_step(app: &AppHandle, installed_commands: &Vec<String>, stage: &PipelineStageTask) {
-        let mut pipeline = Pipeline::default();
-        pipeline.id = stage.id.clone();
-        pipeline.server_id = stage.server_id.clone();
-
-        // 更改状态为 `执行中` 、运行开始时间、序号
-        let status = PipelineStatus::Process;
-        let props = &stage.props;
-        let mut props_stage = props.stage.clone();
-        props_stage.status = Some(status.clone());
-
-        let start_time = Utils::get_date(None);
-        let res = Self::update_current_pipeline(&pipeline, props, true, Some(status.clone()), Some(start_time), None, None, Some(props_stage), None, false);
-
-        let mut error_stage = PipelineCurrentRunStage::default();
-        error_stage.index = 1;
-        error_stage.status = Some(PipelineStatus::Failed);
-
-        if let Some(res) = res.clone().ok() {
-            let pipe: Result<Pipeline, String> = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string());
-            if pipe.is_err() {
-                Self::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, "exec stages failed, `pipeline` prop is empty !", stage.order, Some(PipelineStatus::Failed));
-                return;
-            }
-
-            // 执行 stage
-            let pipe = pipe.unwrap();
-            PipelineRunnableStage::exec(app, stage, &pipe, installed_commands);
-            return;
-        }
-
-        let msg = format!("update pipeline error: {:#?}, exec task step ", res.err());
-        Self::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, &msg, stage.order, Some(PipelineStatus::Failed));
-    }
-
-    fn emit_error_response(app: &AppHandle, err: &str) {
-        EventEmitter::log_res(app, Some(get_error_response(&err)));
-    }
-}
-
 /// MARK: 并行任务
 impl PipelineRunnable {
     /// 批量执行
@@ -305,6 +243,10 @@ impl PipelineRunnable {
         if !result_errors.is_empty() {
             return Ok(get_success_response(Some(serde_json::Value::String(String::from("some pipeline into pools error !")))));
         }
+
+        // 更新线程池数据库
+        let mut pools = POOLS.lock().unwrap();
+        Pool::update(pools.clone())?;
 
         info!("insert into pools success !");
         return Ok(get_success_response(None));

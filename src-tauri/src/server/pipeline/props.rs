@@ -318,7 +318,7 @@ pub struct OsCommands {
 }
 
 /// 执行任务
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineStageTask {
     pub(crate) id: String,
     pub(crate) server_id: String,
@@ -329,7 +329,7 @@ pub struct PipelineStageTask {
 }
 
 /// 执行 step
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineRunnableStageStep {
     pub(crate) id: String,
     pub(crate) server_id: String,
