@@ -8,7 +8,7 @@ use crate::event::EventEmitter;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineHistoryRun, PipelineRunProps, PipelineStageTask, PipelineStatus};
+use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineRunProps, PipelineStageTask, PipelineStatus};
 use crate::{POOLS};
 use lazy_static::lazy_static;
 use log::{error, info};
@@ -177,12 +177,11 @@ impl PipelineRunnable {
 
                         // history
                         if insert_current_into_history {
-                            run.history_list.push(PipelineHistoryRun {
-                                id: pipeline.id.clone(),
-                                server_id: pipeline.server_id.clone(),
-                                current: current.clone(),
-                                extra: pipeline.extra.clone(),
-                            });
+                            let history = pipeline.clone();
+                            if let Some (mut run) = pipeline.run {
+                                run.history_list = Vec::new()
+                            }
+                            run.history_list.push( history);
                         }
 
                         run.current = current;

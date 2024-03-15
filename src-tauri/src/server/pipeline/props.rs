@@ -1,6 +1,7 @@
 //! 流水线属性
 
 use serde::{Deserialize, Serialize};
+use crate::server::pipeline::index::Pipeline;
 
 /// 基本信息
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -214,7 +215,7 @@ pub struct PipelineRunVariable {
     pub(crate) project_name: String, // 名称
     pub(crate) branch: String, // 分支
     #[serde(rename = "historyList")]
-    pub(crate) history_list: Vec<PipelineHistoryRun>, // 运行历史
+    pub(crate) history_list: Vec<Pipeline>, // 运行历史
     pub(crate) current: PipelineCurrentRun, // 当前流水线状态
 }
 
@@ -243,16 +244,6 @@ pub struct PipelineCurrentRunStage {
     pub(crate) finish_group_count: u32, // stage 中运行完成 group 个数
     pub(crate) finished: bool, // 是否完成
     pub(crate) status: Option<PipelineStatus>, // 运行状态
-}
-
-/// 历史运行流水线
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineHistoryRun {
-    pub(crate) id: String,
-    #[serde(rename = "serverId")]
-    pub(crate) server_id: String, // 服务器 ID
-    pub(crate) current: PipelineCurrentRun,
-    pub(crate) extra: Option<ExtraVariable>,
 }
 
 /// 流水线运行时的属性
