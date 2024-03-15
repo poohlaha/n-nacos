@@ -23,7 +23,7 @@ ssh2 = "0.9"
 async-std = "1.12"
 sled = "0.34"
 dirs = "5.0"
-log = "0.4"
+log = { version = "0.4", features = ["max_level_trace", "release_max_level_trace"] }
 thiserror = "1.0"
 git2 = "0.18"
 regex = "1.10"

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// 存储流水线数据库名称
-const PIPELINE_DB_NAME: &str = "pipeline";
+pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
 
 /// 存储流水线名称
 const PIPELINE_NAME: &str = "pipelines";

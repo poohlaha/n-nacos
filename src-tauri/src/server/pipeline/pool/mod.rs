@@ -5,7 +5,6 @@ use std::thread;
 use std::time::Duration;
 use handlers::utils::Utils;
 use log::{error, info};
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator};
 use tauri::AppHandle;
 use crate::database::Database;
 use crate::error::Error;

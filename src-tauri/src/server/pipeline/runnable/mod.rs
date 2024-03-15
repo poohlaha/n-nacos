@@ -41,7 +41,7 @@ impl PipelineRunnable {
         Self::insert_into_pool(props, &pipeline)?;
 
         // 更新线程池数据库
-        let mut pools = POOLS.lock().unwrap();
+        let pools = POOLS.lock().unwrap();
         Pool::update(pools.clone())?;
 
         // 更改流水线状态为 `排队中`
@@ -245,7 +245,7 @@ impl PipelineRunnable {
         }
 
         // 更新线程池数据库
-        let mut pools = POOLS.lock().unwrap();
+        let pools = POOLS.lock().unwrap();
         Pool::update(pools.clone())?;
 
         info!("insert into pools success !");
