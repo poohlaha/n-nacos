@@ -181,10 +181,16 @@ impl Treat<HttpResponse> for Pipeline {
                 line.variables = pipeline.variables.clone();
                 line.process_config = pipeline.process_config.clone();
 
+                let mut history_list = Vec::new();
+                if let Some(pipe_run) = pipeline.run.clone() {
+                    history_list = pipe_run.history_list
+                }
+
                 if let Some(mut run) = line.run.clone() {
                     let mut current = run.current.clone();
                     current.stages = pipeline.process_config.stages.clone();
                     run.current = current;
+                    run.history_list = history_list;
                     line.run = Some(run.clone());
                 }
 
