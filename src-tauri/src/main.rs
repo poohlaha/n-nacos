@@ -18,7 +18,7 @@ use rayon::ThreadPoolBuilder;
 use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
-use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
+use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline, clear_run_history};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
 use std::sync::{Arc, Mutex};
@@ -28,8 +28,8 @@ use crate::server::pipeline::pool::Pool;
 
 const PROJECT_NAME: &str = "n-nacos";
 
-pub(crate) const MAX_THREAD_COUNT: u32 = 2;
-pub(crate) const LOOP_SEC: u64 = 50;
+pub(crate) const MAX_THREAD_COUNT: u32 = 4;
+pub(crate) const LOOP_SEC: u64 = 10;
 
 // 定义全局 线程池
 lazy_static! {
@@ -85,6 +85,7 @@ fn main() {
             get_pipeline_detail,
             pipeline_run,
             query_os_commands,
+            clear_run_history,
             pipeline_batch_run,
             start_monitor,
             stop_monitor,

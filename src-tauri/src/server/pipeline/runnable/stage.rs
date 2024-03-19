@@ -450,7 +450,7 @@ impl PipelineRunnableStage {
             serve,
             upload,
             |str| {
-                EventEmitter::log_event(app, str);
+                EventEmitter::log_event(app, &pipeline.id, str);
             },
         );
 

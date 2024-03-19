@@ -287,7 +287,7 @@ impl PipelineRunnable {
 
     /// 保存日志, 发送消息到前端
     pub(crate) fn save_log(app: &AppHandle, msg: &str, server_id: &str, id: &str, order: u32) {
-        EventEmitter::log_event(app, msg);
+        EventEmitter::log_event(app, id, msg);
         PipelineLogger::save_log(msg, server_id, id, order);
     }
 }

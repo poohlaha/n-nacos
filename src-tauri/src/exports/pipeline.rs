@@ -80,3 +80,13 @@ pub async fn pipeline_batch_run(list: Vec<PipelineRunProps>) -> Result<HttpRespo
 pub async fn query_os_commands() -> Result<HttpResponse, String> {
     Task::task(|| Pipeline::query_os_commands()).await
 }
+
+/// 清空运行历史记录
+#[tauri::command]
+pub async fn clear_run_history(id: String, server_id: String) -> Result<HttpResponse, String> {
+    let mut pipeline = Pipeline::default();
+    pipeline.id = id.to_string();
+    pipeline.server_id = server_id.to_string();
+
+    Task::task_param(pipeline, move |pipeline| Pipeline::clear_run_history(pipeline)).await
+}

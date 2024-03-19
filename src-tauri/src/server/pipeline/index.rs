@@ -11,7 +11,7 @@ use crate::prepare::{get_error_response, get_success_response, get_success_respo
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineCurrentRunStage, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
 use handlers::utils::Utils;
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -456,5 +456,40 @@ impl Pipeline {
     pub(crate) fn query_os_commands() -> Result<HttpResponse, String> {
         let h5_installed_commands = H5FileHandler::get_installed_commands();
         get_success_response_by_value(OsCommands { h5_installed_commands })
+    }
+
+    /// 清空运行历史, 删除流水线运行日志记录
+    pub(crate) fn clear_run_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
+        let res = Pipeline::get_by_id(&pipeline)?;
+        let mut pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let run = pipeline.run;
+        if let Some(run) = run {
+            let mut run_cloned = run.clone();
+            run_cloned.history_list = Vec::new();
+            pipeline.run = Some(run_cloned);
+            let response = Self::update(&pipeline);
+            return match response {
+                Ok(response) => {
+                    // 删除流水线日志
+                    let bool = PipelineLogger::delete_log_by_id(&pipeline.server_id, &pipeline.id);
+                    if !bool {
+                        info!("clear run history failed, can not delete log files !");
+                        return Ok(get_error_response(&format!("清除运行历史失败, 无法删除日志文件!")));
+                    }
+
+                    info!("clear run history success!");
+                    get_success_response_by_value(pipeline)
+                }
+                Err(err) => {
+                    info!("clear run history error: {}", err);
+                    Ok(get_error_response(&format!("清除运行历史失败: {err}")))
+                }
+            }
+
+        }
+
+        let msg = "clear run history failed, `run` prop is empty !";
+        error!("{}", msg);
+        return Err(Error::convert_string(msg));
     }
 }
