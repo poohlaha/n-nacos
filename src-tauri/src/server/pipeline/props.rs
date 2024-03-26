@@ -62,7 +62,8 @@ pub enum PipelineCommandStatus {
     GitPull,   // 代码拉取
     H5Install, // H5 安装依赖
     Pack,      // 项目打包
-    Compress,  // 文件压缩
+    Minimize,  // 文件压缩
+    Compress,  // 图片压缩
     Deploy,    // 项目部署
     Notice,    // 发送通知
 }

@@ -125,18 +125,18 @@ impl PipelineRunnable {
 
                 let pipe = data.iter().find(|s| &s.id == &props.id);
                 if let Some(pipe) = pipe {
-                    let mut pipeline = pipe.clone();
+                    let mut pipe = pipe.clone();
 
                     if let Some(start_time) = start_time.clone() {
-                        pipeline.last_run_time = Some(start_time); // 最后运行时间
+                        pipe.last_run_time = Some(start_time); // 最后运行时间
                     }
 
                     // status
                     if let Some(status) = status.clone() {
-                        pipeline.status = status;
+                        pipe.status = status;
                     }
 
-                    let run = pipeline.run.clone();
+                    let run = pipe.run.clone();
                     if let Some(mut run) = run {
                         let mut current = run.current.clone();
 
@@ -177,19 +177,19 @@ impl PipelineRunnable {
 
                         // history
                         if insert_current_into_history {
-                            let history = pipeline.clone();
-                            if let Some (mut run) = pipeline.run {
+                            let history = pipe.clone();
+                            if let Some (mut run) = pipeline.run.clone() {
                                 run.history_list = Vec::new()
                             }
                             run.history_list.push( history);
                         }
 
                         run.current = current;
-                        pipeline.run = Some(run);
+                        pipe.run = Some(run);
                     }
 
                     // 更新流水线
-                    let res = Pipeline::update_pipeline(data, &pipeline)?;
+                    let res = Pipeline::update_pipeline(data, &pipe)?;
                     if res.code != 200 {
                         return Ok(res.clone());
                     }
@@ -200,7 +200,7 @@ impl PipelineRunnable {
                     }
 
                     // 成功后直接返回流水线数据
-                    let data = serde_json::to_value(&pipeline).map_err(|err| Error::Error(err.to_string()).to_string())?;
+                    let data = serde_json::to_value(&pipe).map_err(|err| Error::Error(err.to_string()).to_string())?;
                     return Ok(get_success_response(Some(data)));
                 }
 

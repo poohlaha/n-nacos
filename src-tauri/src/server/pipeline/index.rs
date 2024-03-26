@@ -475,7 +475,7 @@ impl Pipeline {
             pipeline.run = Some(run_cloned);
             let response = Self::update(&pipeline);
             return match response {
-                Ok(response) => {
+                Ok(_) => {
                     // 删除流水线日志
                     let bool = PipelineLogger::delete_log_by_id(&pipeline.server_id, &pipeline.id);
                     if !bool {

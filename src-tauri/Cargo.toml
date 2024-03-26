@@ -32,7 +32,8 @@ rayon = "1.8"
 crypto-hash = "0.3"
 handlers = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "handlers", version = "0.1.0"}
 sftp = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "sftp", version = "0.1.4"}
-minimize = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "minimize", version = "0.1.0"}
+minimize = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "minimize", version = "0.1.1"}
+images-compressor = "1.0.3"
 
 [dependencies.uuid]
 version = "1.4.0"

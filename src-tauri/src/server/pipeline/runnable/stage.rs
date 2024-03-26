@@ -17,6 +17,9 @@ use sftp::config::{Upload};
 use sftp::upload::SftpUpload;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use images_compressor::compressor::{Compressor, CompressorArgs};
+use images_compressor::factor::Factor;
+use minimize::minify::Minimize;
 use tauri::AppHandle;
 
 const DIR_NAME: &str = "projects";
@@ -187,6 +190,7 @@ impl PipelineRunnableStage {
             PipelineCommandStatus::GitPull => Self::exec_step_git_pull(app, &pipeline, props, stage, &run_stage, order),
             PipelineCommandStatus::H5Install => Self::exec_step_h5_install(app, &pipeline, props, stage, &run_stage, order),
             PipelineCommandStatus::Pack => Self::exec_step_pack(app, &pipeline, props, installed_commands.clone(), stage, &run_stage, order),
+            PipelineCommandStatus::Minimize => Self::exec_step_minimize(app, &pipeline, props, stage, &run_stage, order),
             PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, props, stage, &run_stage, order),
             PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, props, stage, &run_stage, order),
             PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, props, stage, &run_stage, order),
@@ -328,10 +332,214 @@ impl PipelineRunnableStage {
     }
 
     /// 文件压缩
+    fn exec_step_minimize(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRunProps, stage_step: &PipelineRunnableStageStep, stage: &PipelineCurrentRunStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+        let step = &stage_step.step;
+        let pack_name = &format!("【{}】", &step.label);
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
+
+        let mut args = minimize::minify::Args::default();
+        let components = &stage_step.step.components;
+        if components.len() > 0 {
+            // dir
+            let component_dir = components.iter().find(|com| com.prop.as_str() == "dir");
+            if let Some(component_dir) = component_dir {
+                if !component_dir.value.is_empty() {
+                    args.dir = component_dir.value.trim().to_string();
+                }
+            }
+
+            // excludes
+            let component_excludes = components.iter().find(|com| com.prop.as_str() == "excludes");
+            if let Some(component_excludes) = component_excludes {
+                if !component_excludes.value.is_empty() {
+                    let component_excludes = component_excludes.value.trim().to_string();
+                    let excludes: Vec<String> = component_excludes.split("\n").map(|str| str.to_string()).collect();
+                    args.excludes = excludes;
+                }
+            }
+
+            // validateJs
+            let component_validate_js = components.iter().find(|com| com.prop.as_str() == "validateJs");
+            if let Some(component_validate_js) = component_validate_js {
+                if !component_validate_js.value.is_empty() {
+                    let component_validate_js = component_validate_js.value.trim().to_string();
+                    if component_validate_js.to_lowercase().as_str() == "yes" {
+                        args.validate_js = true
+                    } else {
+                        args.validate_js = false
+                    }
+                }
+            }
+
+            // optimizationCss
+            let component_optimization_css = components.iter().find(|com| com.prop.as_str() == "optimizationCss");
+            if let Some(component_optimization_css) = component_optimization_css {
+                if !component_optimization_css.value.is_empty() {
+                    let component_optimization_css = component_optimization_css.value.trim().to_string();
+                    if component_optimization_css.to_lowercase().as_str() == "yes" {
+                        args.optimization_css = true
+                    } else {
+                        args.optimization_css = false
+                    }
+                }
+            }
+
+            if args.dir.is_empty() {
+                args.dir = String::from("build")
+            }
+
+            args.dir = Self::get_deploy_dir(pipeline, &args.dir, stage_step, &pack_name)?;
+            PipelineRunnable::save_log(app, &format!("exec minimize step args: {:#?} ...", args), &pipeline.server_id, &pipeline.id, order);
+
+            let server_id_cloned = Arc::new(pipeline.server_id.clone());
+            let id_cloned = Arc::new(pipeline.id.clone());
+            let app_cloned = Arc::new(app.clone());
+            let success = Minimize::exec(&args, move |msg| {
+                PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+            });
+
+            if !success {
+                let mut result_stage = stage.clone();
+                result_stage.status = Some(PipelineStatus::Failed);
+                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "minimize failed !", order, Some(PipelineStatus::Failed));
+                return Ok((false, None));
+            }
+        }
+
+        // result stage
+        let mut result_stage = stage.clone();
+        result_stage.status = Some(PipelineStatus::Success);
+
+        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), true, &format!("{}", pack_name), order, None);
+        return Ok((true, pipe));
+    }
+
+    /// 图片压缩
     fn exec_step_compress(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRunProps, stage_step: &PipelineRunnableStageStep, stage: &PipelineCurrentRunStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
+
+        let mut args = CompressorArgs {
+            factor: None,
+            origin: "".to_string(),
+            dest: "".to_string(),
+            thread_count: None,
+            image_size: 0,
+        };
+
+        let mut factor = Factor {
+            quality: 0.00,
+            size_ratio: 0.00
+        };
+
+        let components = &stage_step.step.components;
+        if components.len() > 0 {
+            // origin
+            let component_origin = components.iter().find(|com| com.prop.as_str() == "origin");
+            if let Some(component_origin) = component_origin {
+                if !component_origin.value.is_empty() {
+                    let component_origin = component_origin.value.trim().to_string();
+                    args.origin = component_origin
+                }
+            }
+
+            // dest
+            let component_dest = components.iter().find(|com| com.prop.as_str() == "dest");
+            if let Some(component_dest) = component_dest {
+                if !component_dest.value.is_empty() {
+                    let component_dest = component_dest.value.trim().to_string();
+                    args.dest = component_dest
+                }
+            }
+
+            // quality
+            let component_quality = components.iter().find(|com| com.prop.as_str() == "quality");
+            if let Some(component_quality) = component_quality {
+                if !component_quality.value.is_empty() {
+                    let component_quality = component_quality.value.trim().to_string();
+                    if !component_quality.is_empty() {
+                        let quality = match component_quality.parse::<f32>() {
+                            Ok(quality) => {
+                                quality
+                            }
+                            Err(_) => {
+                                0.0
+                            }
+                        };
+
+                        factor.quality = quality
+                    }
+                }
+            }
+
+            // sizeRatio
+            let component_ratio = components.iter().find(|com| com.prop.as_str() == "sizeRatio");
+            if let Some(component_ratio) = component_ratio {
+                if !component_ratio.value.is_empty() {
+                    let component_ratio = component_ratio.value.trim().to_string();
+                    if !component_ratio.is_empty() {
+                        let ratio = match component_ratio.parse::<f32>() {
+                            Ok(ratio) => {
+                                ratio
+                            }
+                            Err(_) => {
+                                0.0
+                            }
+                        };
+
+                        factor.size_ratio = ratio
+                    }
+                }
+            }
+
+            // imageSize
+            let component_image_size = components.iter().find(|com| com.prop.as_str() == "imageSize");
+            if let Some(component_image_size) = component_image_size {
+                if !component_image_size.value.is_empty() {
+                    let component_image_size = component_image_size.value.trim().to_string();
+                    if !component_image_size.is_empty() {
+                        let image_size = match component_image_size.parse::<u64>() {
+                            Ok(image_size) => {
+                                image_size
+                            }
+                            Err(_) => {
+                               0
+                            }
+                        };
+
+                        args.image_size = image_size
+                    }
+                }
+            }
+
+            args.factor = Some(factor);
+
+            if args.origin.is_empty() {
+                args.origin = "build".to_string();
+            }
+
+            args.origin = Self::get_deploy_dir(pipeline, &args.origin, stage_step, &pack_name)?;
+            if args.dest.is_empty() {
+                args.dest = args.origin.clone();
+            }
+
+            PipelineRunnable::save_log(app, &format!("exec compress step args: {:#?}", args), &pipeline.server_id, &pipeline.id, order);
+
+            let server_id_cloned = Arc::new(pipeline.server_id.clone());
+            let id_cloned = Arc::new(pipeline.id.clone());
+            let app_cloned = Arc::new(app.clone());
+            let success = Compressor::new(args).compress(move |msg|{
+                PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+            })?;
+
+            if !success {
+                let mut result_stage = stage.clone();
+                result_stage.status = Some(PipelineStatus::Failed);
+                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "compress failed !", order, Some(PipelineStatus::Failed));
+                return Ok((false, None));
+            }
+        }
 
         // result stage
         let mut result_stage = stage.clone();
@@ -388,31 +596,7 @@ impl PipelineRunnableStage {
         }
 
         // 判断 deploy_dir 是不是绝对路径
-        info!("exec step deploy, deploy dir: {}", deploy_dir);
-        let mut build_dir: String = String::new();
-        if Path::new(&deploy_dir).is_absolute() {
-            info!("exec step deploy, deploy is absolute path !");
-            build_dir = deploy_dir;
-        } else {
-            let basic = &pipeline.basic;
-            let project_name = GitHandler::get_project_name_by_git(&basic.path);
-            let project_dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
-                Ok(dir) => {
-                    dir
-                }
-                Err(err) => {
-                    return Err(Error::convert_string(&format!("exec step deploy {} failed, {}, {}", project_name, err, pack_name)));
-                }
-            };
-
-            info!("exec step deploy, get project dir: {}", project_dir);
-            if !project_dir.is_empty() {
-                let path = Path::new(&project_dir).join(deploy_dir);
-                build_dir = path.as_path().to_string_lossy().to_string();
-                info!("exec step deploy, get build dir: {}", build_dir);
-            }
-        }
-
+        let build_dir = Self::get_deploy_dir(pipeline, &deploy_dir, stage_step, &pack_name)?;
         let response = Server::get_by_id(&Server {
             id: pipeline.server_id.clone(),
             ..Default::default()
@@ -426,6 +610,14 @@ impl PipelineRunnableStage {
         if se.is_none() {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
+
+
+        let need_increment_str: String = Self::get_value_from_variables(&props.selected_variables, "needIncrement");
+        let need_increment = if need_increment_str.as_str().to_lowercase() == "yes" {
+            true
+        } else {
+            false
+        };
 
         let server = se.unwrap();
         let serve = sftp::config::Server {
@@ -441,7 +633,7 @@ impl PipelineRunnableStage {
             dir: build_dir,
             server_dir: server_dir.to_string(),
             server_file_name: None,
-            need_increment: false,
+            need_increment,
         };
 
         info!("sftp upload config: {:#?}", upload);
@@ -860,5 +1052,35 @@ impl PipelineRunnableStage {
     fn send_log(app: &AppHandle, msg: &str, server_id: &str, id: &str, order: u32) {
         info!("{}", &msg);
         PipelineRunnable::save_log(app, &msg, server_id, id, order);
+    }
+
+    /// 获取发布目录
+    fn get_deploy_dir(pipeline: &Pipeline, deploy_dir: &str, stage_step: &PipelineRunnableStageStep, pack_name: &str) -> Result<String, String> {
+        info!("exec step deploy, deploy dir: {}", deploy_dir);
+        let mut build_dir: String = String::new();
+        if Path::new(&deploy_dir).is_absolute() {
+            info!("exec step deploy, deploy is absolute path !");
+            build_dir = deploy_dir.to_string();
+        } else {
+            let basic = &pipeline.basic;
+            let project_name = GitHandler::get_project_name_by_git(&basic.path);
+            let project_dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
+                Ok(dir) => {
+                    dir
+                }
+                Err(err) => {
+                    return Err(Error::convert_string(&format!("exec step deploy {} failed, {}, {}", project_name, err, pack_name)));
+                }
+            };
+
+            info!("exec step deploy, get project dir: {}", project_dir);
+            if !project_dir.is_empty() {
+                let path = Path::new(&project_dir).join(deploy_dir);
+                build_dir = path.as_path().to_string_lossy().to_string();
+                info!("exec step deploy, get build dir: {}", build_dir);
+            }
+        }
+
+        return Ok(build_dir)
     }
 }
