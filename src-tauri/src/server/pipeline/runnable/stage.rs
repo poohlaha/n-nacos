@@ -339,7 +339,21 @@ impl PipelineRunnableStage {
 
         let mut args = minimize::minify::Args::default();
         let components = &stage_step.step.components;
+        let mut needed: bool = true;
         if components.len() > 0 {
+            // isNeed
+            let component_needed = components.iter().find(|com| com.prop.as_str() == "isNeed");
+            if let Some(component_needed) = component_needed {
+                if !component_needed.value.is_empty() {
+                    let is_needed = component_needed.value.trim().to_string();
+                    if is_needed.to_lowercase().as_str() == "yes" {
+                        needed = true
+                    } else {
+                        needed = false
+                    }
+                }
+            }
+
             // dir
             let component_dir = components.iter().find(|com| com.prop.as_str() == "dir");
             if let Some(component_dir) = component_dir {
@@ -391,19 +405,23 @@ impl PipelineRunnableStage {
             args.dir = Self::get_deploy_dir(pipeline, &args.dir, stage_step, &pack_name)?;
             PipelineRunnable::save_log(app, &format!("exec minimize step args: {:#?} ...", args), &pipeline.server_id, &pipeline.id, order);
 
-            let server_id_cloned = Arc::new(pipeline.server_id.clone());
-            let id_cloned = Arc::new(pipeline.id.clone());
-            let app_cloned = Arc::new(app.clone());
-            let success = Minimize::exec(&args, move |msg| {
-                PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
-            });
+            if needed {
+                let server_id_cloned = Arc::new(pipeline.server_id.clone());
+                let id_cloned = Arc::new(pipeline.id.clone());
+                let app_cloned = Arc::new(app.clone());
+                let success = Minimize::exec(&args, move |msg| {
+                    PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+                });
 
-            if !success {
-                let mut result_stage = stage.clone();
-                result_stage.status = Some(PipelineStatus::Failed);
-                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "minimize failed !", order, Some(PipelineStatus::Failed));
-                return Ok((false, None));
+                if !success {
+                    let mut result_stage = stage.clone();
+                    result_stage.status = Some(PipelineStatus::Failed);
+                    PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "minimize failed !", order, Some(PipelineStatus::Failed));
+                    return Ok((false, None));
+                }
             }
+
+            PipelineRunnable::save_log(app, "skip minimize step ...", &pipeline.server_id, &pipeline.id, order);
         }
 
         // result stage
@@ -434,7 +452,21 @@ impl PipelineRunnableStage {
         };
 
         let components = &stage_step.step.components;
+        let mut needed: bool = true;
         if components.len() > 0 {
+            // isNeed
+            let component_needed = components.iter().find(|com| com.prop.as_str() == "isNeed");
+            if let Some(component_needed) = component_needed {
+                if !component_needed.value.is_empty() {
+                    let is_needed = component_needed.value.trim().to_string();
+                    if is_needed.to_lowercase().as_str() == "yes" {
+                        needed = true
+                    } else {
+                        needed = false
+                    }
+                }
+            }
+
             // origin
             let component_origin = components.iter().find(|com| com.prop.as_str() == "origin");
             if let Some(component_origin) = component_origin {
@@ -526,19 +558,23 @@ impl PipelineRunnableStage {
 
             PipelineRunnable::save_log(app, &format!("exec compress step args: {:#?}", args), &pipeline.server_id, &pipeline.id, order);
 
-            let server_id_cloned = Arc::new(pipeline.server_id.clone());
-            let id_cloned = Arc::new(pipeline.id.clone());
-            let app_cloned = Arc::new(app.clone());
-            let success = Compressor::new(args).compress(move |msg|{
-                PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
-            })?;
+            if needed {
+                let server_id_cloned = Arc::new(pipeline.server_id.clone());
+                let id_cloned = Arc::new(pipeline.id.clone());
+                let app_cloned = Arc::new(app.clone());
+                let success = Compressor::new(args).compress(move |msg|{
+                    PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+                })?;
 
-            if !success {
-                let mut result_stage = stage.clone();
-                result_stage.status = Some(PipelineStatus::Failed);
-                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "compress failed !", order, Some(PipelineStatus::Failed));
-                return Ok((false, None));
+                if !success {
+                    let mut result_stage = stage.clone();
+                    result_stage.status = Some(PipelineStatus::Failed);
+                    PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, "compress failed !", order, Some(PipelineStatus::Failed));
+                    return Ok((false, None));
+                }
             }
+
+            PipelineRunnable::save_log(app, "skip compress step ...", &pipeline.server_id, &pipeline.id, order);
         }
 
         // result stage
