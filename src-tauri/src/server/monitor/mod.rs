@@ -118,7 +118,7 @@ impl Monitor {
         };
 
         let file_name = Path::new(file_path).file_name().unwrap_or(OsStr::new("")).to_string_lossy().to_string();
-        let dest_file_path = SftpRunnableHandler::exec(serve.clone(), copy)?;
+        let dest_file_path = SftpRunnableHandler::exec(serve.clone(), copy, |_|{})?;
 
         // 使用异步来启动程序
         let props_cloned = Arc::new(serve.clone());
@@ -141,8 +141,10 @@ impl Monitor {
             return Err(Error::convert_string(&msg));
         }
 
+        let func = |s: &str| {};
+        let log_func = Arc::new(Mutex::new(func));
         // 连接服务器
-        let session = SftpHandler::connect(&server)?;
+        let session = SftpHandler::connect(&server, log_func.clone())?;
         let sftp = session.sftp().map_err(|err| {
             let msg = format!("exec runnable program error: {:#?}", err);
             Error::convert_string(&msg);
@@ -153,7 +155,7 @@ impl Monitor {
         // 判断程序是否在运行
         let mut pid = String::new();
         if sftp.stat(Path::new(&dest_file_path)).is_ok() {
-            pid = SftpRunnableHandler::judge_program_running(&session, file_name)?;
+            pid = SftpRunnableHandler::judge_program_running(&session, file_name, log_func.clone())?;
         }
 
         // 如果在运行，则直接结束

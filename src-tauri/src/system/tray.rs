@@ -1,7 +1,7 @@
 //! 托盘
 
-use tauri::tray::{ClickType, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{App, Manager, Wry};
+use tauri::tray::{TrayIconBuilder};
+use tauri::{App};
 
 pub struct Tray;
 
@@ -13,11 +13,12 @@ impl Tray {
         let _ = TrayIconBuilder::with_id(TRAY_ICON_ID)
             .icon(app.default_window_icon().unwrap().clone())
             .icon_as_template(true)
-            .on_tray_icon_event(Self::on_tray_icon_event)
+            // .on_tray_icon_event(Self::on_tray_icon_event)
             .build(app);
     }
 
-    /// 托盘图标事件
+    /*
+    /// 托盘图标事件, 引入 unstable features 后导致 不能用 ctrl + c/v
     fn on_tray_icon_event(tray: &TrayIcon<Wry>, event: TrayIconEvent) {
         if event.click_type == ClickType::Left {
             let app = tray.app_handle();
@@ -27,4 +28,5 @@ impl Tray {
             }
         }
     }
+    */
 }

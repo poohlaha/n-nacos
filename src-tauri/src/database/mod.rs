@@ -8,6 +8,7 @@ use crate::prepare::{get_error_response, get_success_response, HttpResponse};
 use log::{error, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::Value;
 use sled::{Db};
 use crate::server::pipeline::index::PIPELINE_DB_NAME;
 
@@ -96,8 +97,8 @@ impl Database {
                     servers = serde_json::from_slice(&data).map_err(|err| Error::Error(err.to_string()).to_string())?;
                 }
             } else {
-                info!("get `{}` list from db  failed! ", key);
-                return Ok(get_error_response("获取列表失败"));
+                info!("get `{}` list empty! ", key);
+                return Ok(get_success_response(Some(Value::Array(Vec::new()))));
             }
         } else {
             let db = Database::create(database_name)?;
@@ -105,8 +106,8 @@ impl Database {
             if let Some(data) = data {
                 servers = serde_json::from_slice(&data).map_err(|err| Error::Error(err.to_string()).to_string())?;
             } else {
-                info!("get `{}` list from db  failed! ", key);
-                return Ok(get_error_response("获取列表失败"));
+                info!("get `{}` list empty! ", key);
+                return Ok(get_success_response(Some(Value::Array(Vec::new()))));
             }
         }
 

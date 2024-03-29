@@ -670,8 +670,10 @@ impl PipelineRunnableStage {
             server_dir: server_dir.to_string(),
             server_file_name: None,
             need_increment,
+            need_delete_dir: None
         };
 
+        info!("sftp server config: {:#?}", serve);
         info!("sftp upload config: {:#?}", upload);
 
         let result = SftpUpload::exec(
@@ -682,7 +684,7 @@ impl PipelineRunnableStage {
             },
         );
 
-        match result {
+        return match result {
             Ok(result) => {
                 info!("sftp deploy result: {:#?}", result);
 
@@ -691,7 +693,7 @@ impl PipelineRunnableStage {
                 result_stage.status = Some(PipelineStatus::Success);
 
                 let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), true, &format!("{}", pack_name), order, None);
-                return Ok((true, pipe));
+                Ok((true, pipe))
             }
             Err(err) => {
                 // result stage
@@ -699,7 +701,7 @@ impl PipelineRunnableStage {
                 result_stage.status = Some(PipelineStatus::Failed);
 
                 PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, &format!("deploy error: {}, {}", err, pack_name), order, Some(PipelineStatus::Failed));
-                return Ok((false, None));
+                Ok((false, None))
             }
         }
     }
