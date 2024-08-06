@@ -17,8 +17,8 @@ use sftp::config::{Upload};
 use sftp::upload::SftpUpload;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use images_compressor::compressor::{Compressor, CompressorArgs};
-use images_compressor::factor::Factor;
+// use images_compressor::compressor::{Compressor, CompressorArgs};
+// use images_compressor::factor::Factor;
 use minimize::minify::Minimize;
 use tauri::AppHandle;
 
@@ -438,6 +438,7 @@ impl PipelineRunnableStage {
         let pack_name = &format!("【{}】", &step.label);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
 
+        /*
         let mut args = CompressorArgs {
             factor: None,
             origin: "".to_string(),
@@ -576,6 +577,7 @@ impl PipelineRunnableStage {
 
             PipelineRunnable::save_log(app, "skip compress step ...", &pipeline.server_id, &pipeline.id, order);
         }
+         */
 
         // result stage
         let mut result_stage = stage.clone();

@@ -1,6 +1,6 @@
 {
   "productName": "n-nacos",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "identifier": "n-nacos",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -13,7 +13,6 @@
       {
         "label": "main",
         "title": "n-nacos",
-        "fileDropEnabled": false,
         "fullscreen": false,
         "resizable": true,
         "minWidth": 800,

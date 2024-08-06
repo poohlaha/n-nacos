@@ -1,58 +1,24 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# testing
-/coverage
-
-# production
-/dist
-
-# misc
-.DS_Store
-.env.development.local
-.env.test.local
-.env.production.local
-
-/.idea
-.idea
+# Logs
+logs
+*.log
 npm-debug.log*
-yarn.lock
-package-lock.json
 yarn-debug.log*
 yarn-error.log*
-dist/
-pre-publish-tmp
+pnpm-debug.log*
+lerna-debug.log*
+
 node_modules
-build/
-pnpm-lock.yaml
+dist
+dist-ssr
+*.local
 
-# files
-.commitlintrc.js
-.editorconfig
-.eslintrc.js
-.gitmessage
-.prettierrc.js
-/postcss.config.js
-/babel.config.js
-/tsconfig.json
-*.css.map
-src/communal/exception
-src/communal/hooks
-src/communal/provider
-src/communal/request
-src/communal/router
-src/communal/utils
-src/communal/index.tsx
-src/views/stores/index.tsx
-src/@types/global.d.ts
-
-.vendor
-web/scripts/proxy.json
-Cargo.lock
-target
-output
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
