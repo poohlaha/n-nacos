@@ -24,19 +24,41 @@ use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list,
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{env, thread};
+use dotenvy::dotenv;
+use sqlx::mysql::MySqlPoolOptions;
+use sqlx::{MySql};
 use tauri::AppHandle;
+use crate::database::Database;
 use crate::server::pipeline::pool::Pool;
 
 const PROJECT_NAME: &str = "n-nacos";
 
 pub(crate) const MAX_THREAD_COUNT: u32 = 4;
+
+pub(crate) const MAX_DATABASE_COUNT: u32 = 5;
 pub(crate) const LOOP_SEC: u64 = 10;
 
 // 定义全局 线程池
 lazy_static! {
     static ref POOLS: Arc<Mutex<Vec<PipelineStageTask>>> = Arc::new(Mutex::new(Vec::new()));
 }
+
+// 定义全局 数据库连接池
+lazy_static! {
+    static ref DATABASE_POOLS: Arc<Mutex<Option<sqlx::Pool<MySql>>>> = Arc::new(Mutex::new(None));
+}
+
+/// 定义数据库连接池
+async fn init_database_pools() -> sqlx::Pool<MySql> {
+    dotenv().ok();
+    let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
+
+    let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT)
+        .connect(&url).await.expect(&format!("connect to {url} error !"));
+    return database_pool;
+}
+
 
 /// 初始化一些属性
 fn init(app: &AppHandle) {
@@ -56,7 +78,11 @@ fn init(app: &AppHandle) {
 
 // 日志目录: /Users/xxx/Library/Logs/n-nacos
 // 程序配置目录: /Users/xxx/Library/Application Support/n-nacos
-fn main() {
+#[tokio::main]
+async fn main() {
+    // 创建数据库连接池
+    Database::create_db().await.unwrap();
+
     // tauri
     tauri::Builder::default()
         // .plugin(tauri_plugin_window::init())

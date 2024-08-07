@@ -1,6 +1,6 @@
 //! 流水线阶段
 
-use crate::database::interface::Treat;
+use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::helper::git::pull::GitConfig;
@@ -635,6 +635,7 @@ impl PipelineRunnableStage {
 
         // 判断 deploy_dir 是不是绝对路径
         let build_dir = Self::get_deploy_dir(pipeline, &deploy_dir, stage_step, &pack_name)?;
+        /*
         let response = Server::get_by_id(&Server {
             id: pipeline.server_id.clone(),
             ..Default::default()
@@ -643,12 +644,28 @@ impl PipelineRunnableStage {
         if response.code != 200 {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
-
+        
+        
         let se = convert_res::<Server>(response);
+         */
+        
+        let se = Some(
+            Server {
+                id: "".to_string(),
+                ip: "".to_string(),
+                port: 0,
+                account: "".to_string(),
+                pwd: "".to_string(),
+                name: "".to_string(),
+                description: "".to_string(),
+                create_time: None,
+                update_time: None,
+            }
+        );
+
         if se.is_none() {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
-
 
         let need_increment_str: String = Self::get_value_from_variables(&props.selected_variables, "needIncrement");
         let need_increment = if need_increment_str.as_str().to_lowercase() == "yes" {

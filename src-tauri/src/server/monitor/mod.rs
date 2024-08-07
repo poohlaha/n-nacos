@@ -1,6 +1,6 @@
 //! 读取服务器远程监控信息
 
-use crate::database::interface::Treat;
+use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::prepare::{convert_res, get_error_response, get_success_response, HttpResponse};
@@ -38,6 +38,7 @@ impl Monitor {
         }
 
         // 根据 id 查找服务器
+        /*
         let response = Server::get_by_id(server)?;
         if response.code != 200 {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
@@ -60,6 +61,19 @@ impl Monitor {
         }
 
         let serve = serve.unwrap();
+         */
+        let serve = Server {
+            id: "".to_string(),
+            ip: "".to_string(),
+            port: 0,
+            account: "".to_string(),
+            pwd: "".to_string(),
+            name: "".to_string(),
+            description: "".to_string(),
+            create_time: None,
+            update_time: None,
+        };
+
         let path = Self::get_local_monitor_file(app);
         if path.is_none() {
             return Err(Error::convert_string("can not get local monitor file !"));

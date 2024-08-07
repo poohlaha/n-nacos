@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 Cargo.lock
 pnpm-lock.yaml
+.env

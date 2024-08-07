@@ -1,14 +1,17 @@
 //! 服务器
 
-use crate::database::interface::{Treat, TreatBody};
-use crate::database::Database;
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::error::Error;
 use crate::logger::server::ServerLogger;
-use crate::prepare::{get_error_response, get_success_response, HttpResponse};
+use crate::prepare::{get_error_response, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use handlers::utils::Utils;
-use log::info;
-use serde::{Deserialize, Serialize};
+use log::{error, info};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::Unexpected;
+use sqlx::{FromRow, MySql};
 use uuid::Uuid;
 
 /// 存储服务器数据库名称
@@ -17,7 +20,7 @@ const SERVER_DB_NAME: &str = "server";
 /// 存储服务器名称
 const SERVER_NAME: &str = "servers";
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Server {
     pub(crate) id: String,
     pub(crate) ip: String,
@@ -25,30 +28,27 @@ pub struct Server {
     pub(crate) account: String,
     pub(crate) pwd: String,
     pub(crate) name: String,
-    pub(crate) desc: String,
+    #[serde(rename = "desc")]
+    pub(crate) description: String,
     pub(crate) create_time: Option<String>,
     pub(crate) update_time: Option<String>,
 }
 
 impl TreatBody for Server {}
 
-impl Treat<HttpResponse> for Server {
+#[async_trait]
+impl Treat2<HttpResponse> for Server {
     type B = Server;
 
-    /// 获取 服务器列表
-    fn get_list(_: &Self::B) -> Result<HttpResponse, String> {
-        Database::get_list::<Server>(SERVER_DB_NAME, SERVER_NAME)
-    }
-
     /// 存储 服务器列表
-    fn insert(server: &Self::B) -> Result<HttpResponse, String> {
+    async fn insert(server: &Self::B) -> Result<HttpResponse, String> {
         let res = Self::validate(&server, false);
         if let Some(res) = res {
             return Ok(res);
         }
 
-        let mut response = Self::get_list(&server)?;
-        info!("insert server response: {:#?}", response);
+        let mut response: HttpResponse = Self::get_list(&server).await?;
+        info!("get server list response: {:#?}", response);
         if response.code != 200 {
             response.error = String::from("保存服务器失败");
             return Ok(response);
@@ -67,31 +67,45 @@ impl Treat<HttpResponse> for Server {
         info!("insert server params: {:#?}", server_clone);
 
         let mut data: Vec<Server> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if data.is_empty() {
-            data.push(server_clone)
-        } else {
+        if !data.is_empty() {
             // 查找IP是不是存在
             let serve = data.iter().find(|s| &s.ip == &server.ip);
             // 找到 IP
             if serve.is_some() {
                 return Ok(get_error_response("服务器IP已存在"));
             }
-
-            data.push(server_clone)
         }
 
-        Database::update::<Server>(SERVER_DB_NAME, SERVER_NAME, data, "保存服务器失败")
+        let query = sqlx::query::<MySql>(
+            "INSERT INTO server (id, ip, port, account, pwd, name, description, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+            .bind(&server_clone.id)
+            .bind(&server_clone.ip)
+            .bind(&server_clone.port)
+            .bind(&server_clone.account)
+            .bind(&server_clone.pwd)
+            .bind(&server_clone.name)
+            .bind(&server_clone.description)
+            .bind(&server_clone.create_time)
+            .bind(&server_clone.update_time);
+        return Self::execute_update(query).await;
+    }
+
+    /// 获取 服务器列表
+    async fn get_list(_: &Self::B) -> Result<HttpResponse, String> {
+        let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server");
+        return Self::execute_query(query).await;
     }
 
     /// 更新服务器
-    fn update(server: &Self::B) -> Result<HttpResponse, String> {
+    async fn update(server: &Self::B) -> Result<HttpResponse, String> {
         let res = Self::validate(&server, true);
         if let Some(res) = res {
             return Ok(res);
         }
 
-        let mut response = Self::get_list(&server)?;
-        info!("update server response: {:#?}", response);
+        let mut response: HttpResponse = Self::get_by_id(&server).await?;
+        info!("get server by id: {} response: {:#?}", server.id, response);
         if response.code != 200 {
             response.error = String::from("更新服务器失败");
             return Ok(response);
@@ -99,6 +113,7 @@ impl Treat<HttpResponse> for Server {
 
         let mut server_clone = server.clone();
         server_clone.update_time = Some(Utils::get_date(None));
+
         info!("update server params: {:#?}", server_clone);
 
         let data: Vec<Server> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
@@ -106,29 +121,48 @@ impl Treat<HttpResponse> for Server {
             return Ok(get_error_response("更新服务器失败, 该服务器不存在"));
         }
 
-        let serve = data.iter().find(|s| &s.id == &server_clone.id);
-        if serve.is_none() {
-            return Ok(get_error_response("更新服务器失败, 该服务器不存在"));
-        }
+        let serve = data.get(0).unwrap();
 
         // 判断 IP 是否存在
-        let serve = data.iter().find(|s| &s.ip == &server_clone.ip && &s.id != &server_clone.id);
-        if serve.is_some() {
+        let query = sqlx::query_as::<_, Server>(
+            "select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where ip = ? and id != ?"
+        )
+            .bind(&server.ip)
+            .bind(&serve.id);
+
+        let mut result = Self::execute_query(query).await?;
+        if result.code != 200 {
+            result.error = String::from("更新服务器失败");
+            return Ok(result);
+        }
+
+        let data: Vec<Server> = serde_json::from_value(result.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if !data.is_empty() {
             return Ok(get_error_response("更新服务器失败, 该服务器IP已存在"));
         }
 
-        let servers: Vec<Server> = data.iter().map(|s| if &s.id == &server.id { server_clone.clone() } else { s.clone() }).collect();
+        let query = sqlx::query::<MySql>(
+            "UPDATE server set ip = ?, port = ?, account = ?, pwd = ?, name = ?, description = ?, update_time = ? where id = ?"
+        )
+            .bind(&server_clone.ip)
+            .bind(&server_clone.port)
+            .bind(&server_clone.account)
+            .bind(&server_clone.pwd)
+            .bind(&server_clone.name)
+            .bind(&server_clone.description)
+            .bind(&server_clone.update_time)
+            .bind(&serve.id);
 
-        Database::update::<Server>(SERVER_DB_NAME, SERVER_NAME, servers, "更新服务器失败")
+        return Self::execute_update(query).await;
     }
 
     /// 删除服务器
-    fn delete(server: &Self::B) -> Result<HttpResponse, String> {
+    async fn delete(server: &Self::B) -> Result<HttpResponse, String> {
         if server.id.is_empty() {
             return Ok(get_error_response("删除服务器失败, `id` 不能为空"));
         }
 
-        let mut response = Self::get_list(&server)?;
+        let mut response: HttpResponse = Self::get_by_id(&server).await?;
         if response.code != 200 {
             response.error = String::from("删除服务器失败");
             return Ok(response);
@@ -141,12 +175,9 @@ impl Treat<HttpResponse> for Server {
             return Ok(get_error_response("删除服务器失败, 该服务器不存在"));
         }
 
-        let serve = data.iter().find(|s| s.id.as_str() == id.as_str());
-        if serve.is_none() {
-            return Ok(get_error_response("删除服务器失败, 该服务器不存在"));
-        }
-
-        let servers: Vec<Server> = data.iter().filter_map(|s| if s.id.as_str() == id.as_str() { None } else { Some(s.clone()) }).collect();
+        let serve = data.get(0).unwrap();
+        let query = sqlx::query::<MySql>("delete from server where id = ?").bind(&serve.id);
+        let result = Self::execute_update(query).await?;
 
         // 删除流水线
         Pipeline::clear(&id)?;
@@ -154,37 +185,18 @@ impl Treat<HttpResponse> for Server {
         // 删除流水线日志
         ServerLogger::delete_log_dir(&id);
 
-        // 更新服务器列表
-        Database::update::<Server>(SERVER_DB_NAME, SERVER_NAME, servers, "删除服务器失败")
+        return Ok(result)
     }
 
     /// 根据 ID 查找数据
-    fn get_by_id(server: &Self::B) -> Result<HttpResponse, String> {
+    async fn get_by_id(server: &Self::B) -> Result<HttpResponse, String> {
         if server.id.is_empty() {
             return Ok(get_error_response("根据 ID 查找服务器失败, `id` 不能为空"));
         }
 
-        let mut response = Self::get_list(&server)?;
-        if response.code != 200 {
-            response.error = String::from("根据 ID 查找服务器失败");
-            return Ok(response);
-        }
-
-        let id = &server.id;
-        info!("get server by id: {}", &id);
-        let data: Vec<Server> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if data.is_empty() {
-            return Ok(get_error_response("根据 ID 查找服务器失败, 服务器不存在"));
-        }
-
-        let serve = data.iter().find(|s| &s.id == &server.id);
-
-        if let Some(data) = serve {
-            let data = serde_json::to_value(data).map_err(|err| Error::Error(err.to_string()).to_string())?;
-            return Ok(get_success_response(Some(data)));
-        }
-
-        return Ok(get_error_response("根据 ID 查找服务器失败, 该服务器不存在"));
+        info!("get server by id: {}", &server.id);
+        let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where id = ?").bind(&server.id);
+        return Self::execute_query(query).await;
     }
 }
 

@@ -1,6 +1,8 @@
 //! 本地 sled 存储
 
+use std::env;
 use std::sync::{Arc, Mutex};
+use dotenvy::dotenv;
 use lazy_static::lazy_static;
 use crate::error::Error;
 use crate::helper::index::Helper;
@@ -10,6 +12,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use sled::{Db};
+use sqlx::mysql::MySqlPoolOptions;
+use crate::{DATABASE_POOLS, MAX_DATABASE_COUNT};
 use crate::server::pipeline::index::PIPELINE_DB_NAME;
 
 pub(crate) mod interface;
@@ -150,4 +154,29 @@ impl Database {
         }
 
     }
+
+    /// 创建数据库
+    pub(crate) async fn create_db() -> Result<(), String> {
+        let mut pipeline_db = DATABASE_POOLS.lock().unwrap();
+        if pipeline_db.is_none() {
+            dotenv().ok();
+            let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
+            let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT)
+                .connect(&url).await.map_err(|err| Error::Error(format!("connect to {url} error: {:#?} !", err)).to_string())?;
+            *pipeline_db = Some(database_pool)
+        }
+
+        Ok(())
+    }
+
+    /// 增加，修改，删除 - 需要写sql语句
+    pub(crate) async fn execute<T>(sql: &str) -> Result<(), String> {
+        let pool = DATABASE_POOLS.lock().unwrap();
+        if let Some(pool) = &*pool {
+           sqlx::query(sql).execute(pool).await.map_err(|err|Error::Error(err.to_string()).to_string())?;
+        }
+
+        Ok(())
+    }
+
 }
