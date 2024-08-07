@@ -1,20 +1,20 @@
 //! 线程池
 
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-use handlers::utils::Utils;
-use log::{error, info};
-use tauri::AppHandle;
 use crate::database::Database;
 use crate::error::Error;
-use rayon::prelude::*;
-use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineStageTask, PipelineStatus};
-use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
+use crate::server::pipeline::runnable::PipelineRunnable;
+use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
+use handlers::utils::Utils;
+use log::{error, info};
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tauri::AppHandle;
 
 /// 存储流水线线程名称
 const PIPELINE_POOLS_NAME: &str = "pipeline_pools";
@@ -25,7 +25,6 @@ const POOLS_NAME: &str = "pools";
 pub struct Pool;
 
 impl Pool {
-
     /// 启动线程池
     pub(crate) fn start(app: &AppHandle) {
         Self::exec_pool_tasks(app);
@@ -36,9 +35,7 @@ impl Pool {
     pub(crate) fn get_pools() {
         info!("get pools list from database ...");
         let list = match Self::get_list() {
-            Ok(list) => {
-                list
-            }
+            Ok(list) => list,
             Err(err) => {
                 error!("get pools list error: {}", err);
                 return;
@@ -68,11 +65,11 @@ impl Pool {
         info!("pipeline pools lave count: {}", pool_len - len);
 
         // 同步数据库
-        match Self::delete(tasks.clone()){
+        match Self::delete(tasks.clone()) {
             Ok(_) => {}
             Err(err) => {
                 error!("update pipeline pools database error: {}", err);
-                return
+                return;
             }
         }
 
@@ -143,19 +140,18 @@ impl Pool {
 
     pub(crate) fn delete(tasks: Vec<PipelineStageTask>) -> Result<(), String> {
         if tasks.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let list = Self::get_list()?;
         if list.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
-        let list: Vec<PipelineStageTask> = list.into_iter().filter(|list_item| {
-            !tasks.iter().any(|task_item| {
-                list_item.id == task_item.id && list_item.server_id == task_item.server_id
-            })
-        }).collect();
+        let list: Vec<PipelineStageTask> = list
+            .into_iter()
+            .filter(|list_item| !tasks.iter().any(|task_item| list_item.id == task_item.id && list_item.server_id == task_item.server_id))
+            .collect();
 
         info!("delete pool list count: {:#?}", tasks.len());
         info!("delete pool lave count: {}", list.len());
@@ -164,5 +160,4 @@ impl Pool {
 
         Ok(())
     }
-
 }

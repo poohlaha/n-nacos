@@ -1,7 +1,7 @@
 //! 托盘
 
-use tauri::tray::{TrayIconBuilder};
-use tauri::{App};
+use tauri::tray::TrayIconBuilder;
+use tauri::App;
 
 pub struct Tray;
 

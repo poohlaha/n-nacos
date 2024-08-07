@@ -490,8 +490,7 @@ impl Pipeline {
                     info!("clear run history error: {}", err);
                     Ok(get_error_response(&format!("清除运行历史失败: {err}")))
                 }
-            }
-
+            };
         }
 
         let msg = "clear run history failed, `run` prop is empty !";

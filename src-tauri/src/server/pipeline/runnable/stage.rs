@@ -13,7 +13,7 @@ use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
 use crate::server::pipeline::props::{PipelineCommandStatus, PipelineCurrentRunStage, PipelineRunProps, PipelineRunnableStageStep, PipelineSelectedVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
-use sftp::config::{Upload};
+use sftp::config::Upload;
 use sftp::upload::SftpUpload;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -137,11 +137,7 @@ impl PipelineRunnableStage {
         info!("insert result to log ...");
         let last_step = steps.get(steps.len() - 1);
         let mut success_stage = PipelineCurrentRunStage::default();
-        success_stage.status = if has_error {
-            Some(PipelineStatus::Failed)
-        } else {
-            Some(PipelineStatus::Success)
-        };
+        success_stage.status = if has_error { Some(PipelineStatus::Failed) } else { Some(PipelineStatus::Success) };
 
         info!("error_step: {:#?}", error_step);
         if let Some(error_step) = error_step {
@@ -298,9 +294,7 @@ impl PipelineRunnableStage {
 
         // 取 packDir
         let dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
-            Ok(dir) => {
-                dir
-            }
+            Ok(dir) => dir,
             Err(err) => {
                 PipelineRunnable::exec_end_log(
                     app,
@@ -644,35 +638,29 @@ impl PipelineRunnableStage {
         if response.code != 200 {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
-        
-        
+
+
         let se = convert_res::<Server>(response);
          */
-        
-        let se = Some(
-            Server {
-                id: "".to_string(),
-                ip: "".to_string(),
-                port: 0,
-                account: "".to_string(),
-                pwd: "".to_string(),
-                name: "".to_string(),
-                description: "".to_string(),
-                create_time: None,
-                update_time: None,
-            }
-        );
+
+        let se = Some(Server {
+            id: "".to_string(),
+            ip: "".to_string(),
+            port: 0,
+            account: "".to_string(),
+            pwd: "".to_string(),
+            name: "".to_string(),
+            description: "".to_string(),
+            create_time: None,
+            update_time: None,
+        });
 
         if se.is_none() {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
 
         let need_increment_str: String = Self::get_value_from_variables(&props.selected_variables, "needIncrement");
-        let need_increment = if need_increment_str.as_str().to_lowercase() == "yes" {
-            true
-        } else {
-            false
-        };
+        let need_increment = if need_increment_str.as_str().to_lowercase() == "yes" { true } else { false };
 
         let server = se.unwrap();
         let serve = sftp::config::Server {
@@ -689,19 +677,15 @@ impl PipelineRunnableStage {
             server_dir: server_dir.to_string(),
             server_file_name: None,
             need_increment,
-            need_delete_dir: None
+            need_delete_dir: None,
         };
 
         info!("sftp server config: {:#?}", serve);
         info!("sftp upload config: {:#?}", upload);
 
-        let result = SftpUpload::exec(
-            serve,
-            upload,
-            |str| {
-                EventEmitter::log_event(app, &pipeline.id, str);
-            },
-        );
+        let result = SftpUpload::exec(serve, upload, |str| {
+            EventEmitter::log_event(app, &pipeline.id, str);
+        });
 
         return match result {
             Ok(result) => {
@@ -722,7 +706,7 @@ impl PipelineRunnableStage {
                 PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(result_stage.clone()), false, &format!("deploy error: {}, {}", err, pack_name), order, Some(PipelineStatus::Failed));
                 Ok((false, None))
             }
-        }
+        };
     }
 
     /// 发送通知
@@ -1090,7 +1074,7 @@ impl PipelineRunnableStage {
             let project_dir = Self::get_project_path(&pipeline.server_id, &pipeline.id)?;
             let project_dir = project_dir.join(&project_name).join(&pack_dir);
             if !project_dir.exists() {
-                return Err(Error::convert_string(&format!("project dir: {:#?} not exists !", project_dir)))
+                return Err(Error::convert_string(&format!("project dir: {:#?} not exists !", project_dir)));
             }
 
             dir = project_dir.to_string_lossy().to_string();
@@ -1122,9 +1106,7 @@ impl PipelineRunnableStage {
             let basic = &pipeline.basic;
             let project_name = GitHandler::get_project_name_by_git(&basic.path);
             let project_dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
-                Ok(dir) => {
-                    dir
-                }
+                Ok(dir) => dir,
                 Err(err) => {
                     return Err(Error::convert_string(&format!("exec step deploy {} failed, {}, {}", project_name, err, pack_name)));
                 }
@@ -1138,6 +1120,6 @@ impl PipelineRunnableStage {
             }
         }
 
-        return Ok(build_dir)
+        return Ok(build_dir);
     }
 }

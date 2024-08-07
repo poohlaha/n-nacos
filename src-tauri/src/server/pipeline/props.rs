@@ -1,7 +1,7 @@
 //! 流水线属性
 
-use serde::{Deserialize, Serialize};
 use crate::server::pipeline::index::Pipeline;
+use serde::{Deserialize, Serialize};
 
 /// 基本信息
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]

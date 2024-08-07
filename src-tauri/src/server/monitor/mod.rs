@@ -132,7 +132,7 @@ impl Monitor {
         };
 
         let file_name = Path::new(file_path).file_name().unwrap_or(OsStr::new("")).to_string_lossy().to_string();
-        let dest_file_path = SftpRunnableHandler::exec(serve.clone(), copy, |_|{})?;
+        let dest_file_path = SftpRunnableHandler::exec(serve.clone(), copy, |_| {})?;
 
         // 使用异步来启动程序
         let props_cloned = Arc::new(serve.clone());

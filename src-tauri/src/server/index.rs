@@ -1,16 +1,16 @@
 //! 服务器
 
-use async_trait::async_trait;
-use chrono::NaiveDateTime;
 use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::error::Error;
 use crate::logger::server::ServerLogger;
 use crate::prepare::{get_error_response, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use handlers::utils::Utils;
 use log::{error, info};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Unexpected;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sqlx::{FromRow, MySql};
 use uuid::Uuid;
 
@@ -76,9 +76,7 @@ impl Treat2<HttpResponse> for Server {
             }
         }
 
-        let query = sqlx::query::<MySql>(
-            "INSERT INTO server (id, ip, port, account, pwd, name, description, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
+        let query = sqlx::query::<MySql>("INSERT INTO server (id, ip, port, account, pwd, name, description, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&server_clone.id)
             .bind(&server_clone.ip)
             .bind(&server_clone.port)
@@ -124,9 +122,7 @@ impl Treat2<HttpResponse> for Server {
         let serve = data.get(0).unwrap();
 
         // 判断 IP 是否存在
-        let query = sqlx::query_as::<_, Server>(
-            "select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where ip = ? and id != ?"
-        )
+        let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where ip = ? and id != ?")
             .bind(&server.ip)
             .bind(&serve.id);
 
@@ -141,9 +137,7 @@ impl Treat2<HttpResponse> for Server {
             return Ok(get_error_response("更新服务器失败, 该服务器IP已存在"));
         }
 
-        let query = sqlx::query::<MySql>(
-            "UPDATE server set ip = ?, port = ?, account = ?, pwd = ?, name = ?, description = ?, update_time = ? where id = ?"
-        )
+        let query = sqlx::query::<MySql>("UPDATE server set ip = ?, port = ?, account = ?, pwd = ?, name = ?, description = ?, update_time = ? where id = ?")
             .bind(&server_clone.ip)
             .bind(&server_clone.port)
             .bind(&server_clone.account)
@@ -185,7 +179,7 @@ impl Treat2<HttpResponse> for Server {
         // 删除流水线日志
         ServerLogger::delete_log_dir(&id);
 
-        return Ok(result)
+        return Ok(result);
     }
 
     /// 根据 ID 查找数据

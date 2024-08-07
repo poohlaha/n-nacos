@@ -17,20 +17,20 @@ mod task;
 use lazy_static::lazy_static;
 use rayon::ThreadPoolBuilder;
 
+use crate::database::Database;
 use crate::exports::monitor::{start_monitor, stop_monitor};
+use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
-use exports::pipeline::{delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline, clear_run_history};
+use dotenvy::dotenv;
+use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
+use sqlx::mysql::MySqlPoolOptions;
+use sqlx::MySql;
 use std::sync::{Arc, Mutex};
 use std::{env, thread};
-use dotenvy::dotenv;
-use sqlx::mysql::MySqlPoolOptions;
-use sqlx::{MySql};
 use tauri::AppHandle;
-use crate::database::Database;
-use crate::server::pipeline::pool::Pool;
 
 const PROJECT_NAME: &str = "n-nacos";
 
@@ -54,11 +54,9 @@ async fn init_database_pools() -> sqlx::Pool<MySql> {
     dotenv().ok();
     let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
 
-    let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT)
-        .connect(&url).await.expect(&format!("connect to {url} error !"));
+    let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT).connect(&url).await.expect(&format!("connect to {url} error !"));
     return database_pool;
 }
-
 
 /// 初始化一些属性
 fn init(app: &AppHandle) {

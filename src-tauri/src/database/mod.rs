@@ -1,20 +1,20 @@
 //! 本地 sled 存储
 
-use std::env;
-use std::sync::{Arc, Mutex};
-use dotenvy::dotenv;
-use lazy_static::lazy_static;
 use crate::error::Error;
 use crate::helper::index::Helper;
 use crate::prepare::{get_error_response, get_success_response, HttpResponse};
+use crate::server::pipeline::index::PIPELINE_DB_NAME;
+use crate::{DATABASE_POOLS, MAX_DATABASE_COUNT};
+use dotenvy::dotenv;
+use lazy_static::lazy_static;
 use log::{error, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
-use sled::{Db};
+use sled::Db;
 use sqlx::mysql::MySqlPoolOptions;
-use crate::{DATABASE_POOLS, MAX_DATABASE_COUNT};
-use crate::server::pipeline::index::PIPELINE_DB_NAME;
+use std::env;
+use std::sync::{Arc, Mutex};
 
 pub(crate) mod interface;
 
@@ -69,7 +69,7 @@ impl Database {
                         info!("update `{}` tree failed: {:#?}", key, err);
                         Ok(get_error_response(error))
                     }
-                }
+                };
             } else {
                 return Ok(get_error_response(error));
             }
@@ -81,10 +81,9 @@ impl Database {
                     info!("update `{}` tree failed: {:#?}", key, err);
                     Ok(get_error_response(error))
                 }
-            }
+            };
         }
     }
-
 
     /// 获取列表
     pub(crate) fn get_list<T>(database_name: &str, key: &str) -> Result<HttpResponse, String>
@@ -136,11 +135,11 @@ impl Database {
                         error!("delete `{}` data from db error: {:#?}", key, err);
                         Ok(get_error_response("删除数据失败"))
                     }
-                }
+                };
             } else {
                 let msg = format!("delete `{}` data from db failed !", key);
                 error!("{}", &msg);
-                return Ok(get_error_response("删除数据失败"))
+                return Ok(get_error_response("删除数据失败"));
             }
         } else {
             let db = Database::create(database_name)?;
@@ -150,9 +149,8 @@ impl Database {
                     error!("delete `{}` data from db error: {:#?}", key, err);
                     Ok(get_error_response("删除数据失败"))
                 }
-            }
+            };
         }
-
     }
 
     /// 创建数据库
@@ -161,8 +159,11 @@ impl Database {
         if pipeline_db.is_none() {
             dotenv().ok();
             let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
-            let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT)
-                .connect(&url).await.map_err(|err| Error::Error(format!("connect to {url} error: {:#?} !", err)).to_string())?;
+            let database_pool = MySqlPoolOptions::new()
+                .max_connections(MAX_DATABASE_COUNT)
+                .connect(&url)
+                .await
+                .map_err(|err| Error::Error(format!("connect to {url} error: {:#?} !", err)).to_string())?;
             *pipeline_db = Some(database_pool)
         }
 
@@ -173,10 +174,9 @@ impl Database {
     pub(crate) async fn execute<T>(sql: &str) -> Result<(), String> {
         let pool = DATABASE_POOLS.lock().unwrap();
         if let Some(pool) = &*pool {
-           sqlx::query(sql).execute(pool).await.map_err(|err|Error::Error(err.to_string()).to_string())?;
+            sqlx::query(sql).execute(pool).await.map_err(|err| Error::Error(err.to_string()).to_string())?;
         }
 
         Ok(())
     }
-
 }

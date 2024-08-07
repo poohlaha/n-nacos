@@ -25,13 +25,13 @@ const MONITOR_RES_EVENT_NAME: &str = "monitor_response";
 pub struct EventSendParams {
     pub(crate) response: Option<HttpResponse>,
     pub(crate) msg: String,
-    pub(crate) id: Option<String>
+    pub(crate) id: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 struct EventSendMsg {
     pub(crate) msg: String,
-    pub(crate) id: String
+    pub(crate) id: String,
 }
 
 impl EventEmitter {
@@ -48,10 +48,7 @@ impl EventEmitter {
     }
 
     fn emit_string(app: &AppHandle, event_name: &str, id: &str, msg: &str) {
-        let emit = app.emit(event_name, EventSendMsg {
-            msg: msg.to_string(),
-            id: id.to_string(),
-        });
+        let emit = app.emit(event_name, EventSendMsg { msg: msg.to_string(), id: id.to_string() });
         match emit {
             Ok(_) => {
                 info!("send string to window success !");
@@ -113,7 +110,15 @@ impl EventEmitter {
     /// 发送字符串消息
     pub(crate) fn log_event(app: &AppHandle, id: &str, msg: &str) {
         info!("{}", msg);
-        EventEmitter::emit(app, EventSendParams { response: None, id: Some(id.to_string()), msg: msg.to_string() }, 1);
+        EventEmitter::emit(
+            app,
+            EventSendParams {
+                response: None,
+                id: Some(id.to_string()),
+                msg: msg.to_string(),
+            },
+            1,
+        );
     }
 
     /// 发送步骤结果

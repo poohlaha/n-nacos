@@ -8,13 +8,13 @@ use crate::event::EventEmitter;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
+use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineRunProps, PipelineStageTask, PipelineStatus};
-use crate::{POOLS};
+use crate::POOLS;
 use lazy_static::lazy_static;
 use log::{error, info};
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
-use crate::server::pipeline::pool::Pool;
 
 // 共享 pipeline 数据
 lazy_static! {
@@ -178,10 +178,10 @@ impl PipelineRunnable {
                         // history
                         if insert_current_into_history {
                             let history = pipe.clone();
-                            if let Some (mut run) = pipeline.run.clone() {
+                            if let Some(mut run) = pipeline.run.clone() {
                                 run.history_list = Vec::new()
                             }
-                            run.history_list.push( history);
+                            run.history_list.push(history);
                         }
 
                         run.current = current;
