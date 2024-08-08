@@ -9,9 +9,9 @@ use sqlx::FromRow;
 pub struct PipelineBasic {
     pub(crate) id: String,
     pub(crate) pipeline_id: String, // 流水线ID
-    pub(crate) name: String, // 名称
-    pub(crate) tag: PipelineTag, // 标签
-    pub(crate) path: String, // 项目路径
+    pub(crate) name: String,        // 名称
+    pub(crate) tag: PipelineTag,    // 标签
+    pub(crate) path: String,        // 项目路径
     #[serde(rename = "desc")]
     pub(crate) description: String, // 描述
     pub(crate) create_time: Option<String>,
@@ -109,11 +109,11 @@ impl PipelineProcess {
 pub struct PipelineVariable {
     pub(crate) id: String,
     pub(crate) pipeline_id: String,
-    pub(crate) name: String, // 变量名
-    pub(crate) genre: String, // 变量类型
-    pub(crate) value: String, // 值
+    pub(crate) name: String,     // 变量名
+    pub(crate) genre: String,    // 变量类型
+    pub(crate) value: String,    // 值
     pub(crate) disabled: String, // 是否禁用
-    pub(crate) require: String, // 是否必填
+    pub(crate) require: String,  // 是否必填
     #[serde(rename = "desc")]
     pub(crate) description: String, // 描述
     pub(crate) create_time: Option<String>,
@@ -189,7 +189,6 @@ pub enum PipelineStatus {
     Failed,  // 运行失败
     Stop,    // 中止运行
 }
-
 
 impl Default for PipelineStatus {
     fn default() -> Self {

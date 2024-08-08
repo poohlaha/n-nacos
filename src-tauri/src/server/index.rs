@@ -7,7 +7,7 @@ use crate::prepare::{get_error_response, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use async_trait::async_trait;
 use handlers::utils::Utils;
-use log::{info};
+use log::info;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySql};
 use uuid::Uuid;
@@ -58,8 +58,7 @@ impl Treat2<HttpResponse> for Server {
         info!("insert server params: {:#?}", server_clone);
 
         // 判断 IP 是否存在
-        let query = sqlx::query_as::<_, Server>("select ip from server where ip = ?")
-            .bind(&server.ip);
+        let query = sqlx::query_as::<_, Server>("select ip from server where ip = ?").bind(&server.ip);
         let mut result = Self::execute_query(query).await?;
         if result.code != 200 {
             result.error = String::from("保存服务器失败");
@@ -86,7 +85,9 @@ impl Treat2<HttpResponse> for Server {
 
     /// 获取 服务器列表
     async fn get_list(_: &Self::B) -> Result<HttpResponse, String> {
-        let query = sqlx::query_as::<_, Server>("SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC");
+        let query = sqlx::query_as::<_, Server>(
+            "SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
+        );
         return Self::execute_query(query).await;
     }
 

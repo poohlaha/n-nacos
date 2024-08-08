@@ -8,17 +8,17 @@ use crate::helper::git::GitHandler;
 use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
+use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineCurrentRunStage, PipelineProcess, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
+use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::{FromRow, MySql, Row};
 use std::path::PathBuf;
-use async_trait::async_trait;
-use sqlx::mysql::{MySqlArguments, MySqlRow};
 use uuid::Uuid;
-use crate::server::index::Server;
 
 /// 存储流水线数据库名称
 pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
@@ -34,9 +34,9 @@ pub struct Pipeline {
     #[serde(rename = "lastRunTime")]
     pub(crate) last_run_time: Option<String>, // 最后运行时间
     pub(crate) status: PipelineStatus, // 状态, 同步于 steps
-    pub(crate) basic_id: String, // 基本信息 ID
-    pub(crate) basic: PipelineBasic, // 基本信息
-    pub(crate) process_id: String, // 流程配置 ID
+    pub(crate) basic_id: String,       // 基本信息 ID
+    pub(crate) basic: PipelineBasic,   // 基本信息
+    pub(crate) process_id: String,     // 流程配置 ID
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcess, // 流程配置
     pub(crate) variables: Vec<PipelineVariable>, // 变量
@@ -82,7 +82,9 @@ impl Treat2<HttpResponse> for Pipeline {
             return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
         }
 
-        let query = sqlx::query_as::<_, Pipeline>("SELECT id, server_id, last_run_time, `status`, basic_id, process_id, create_time, update_time FROM pipeline ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC");
+        let query = sqlx::query_as::<_, Pipeline>(
+            "SELECT id, server_id, last_run_time, `status`, basic_id, process_id, create_time, update_time FROM pipeline ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
+        );
         return Self::execute_query(query).await;
 
         /*
@@ -252,7 +254,7 @@ impl Treat2<HttpResponse> for Pipeline {
 
         // 删除流水线日志
         PipelineLogger::delete_log_by_id(&server_id, &id);
-        return Ok(response)
+        return Ok(response);
     }
 
     /// 根据 ID 查找数据
@@ -267,7 +269,7 @@ impl Treat2<HttpResponse> for Pipeline {
 
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
         let query = sqlx::query_as::<_, Server>("select * from pipeline where id = ? and server_id = ?").bind(&pipeline.id).bind(&pipeline.server_id);
-        let mut response =  Self::execute_query(query).await?;
+        let mut response = Self::execute_query(query).await?;
         if response.code != 200 {
             response.error = String::from("根据 ID 查找流水线失败");
             return Ok(response);
@@ -308,7 +310,8 @@ impl Pipeline {
             return Self::get_list(pipeline).await;
         }
 
-        let query: sqlx::query::QueryAs<'_, MySql, Pipeline, MySqlArguments> = sqlx::query_as::<_, Pipeline>(r#"
+        let query: sqlx::query::QueryAs<'_, MySql, Pipeline, MySqlArguments> = sqlx::query_as::<_, Pipeline>(
+            r#"
             SELECT
                 p.id,
                 p.server_id,
@@ -332,9 +335,10 @@ impl Pipeline {
                 END DESC,
                 p.update_time DESC,
                 p.create_time DESC
-        "#)
-            .bind(&form.name)
-            .bind(&form.status);
+        "#,
+        )
+        .bind(&form.name)
+        .bind(&form.status);
 
         return Self::execute_query(query).await;
     }
