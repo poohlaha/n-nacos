@@ -60,10 +60,7 @@ where
 
     /// 执行 update, insert, delete
     async fn execute_update<'a>(query: Query<'a, MySql, MySqlArguments>) -> Result<HttpResponse, String> {
-        let pool = {
-            let pools = DATABASE_POOLS.lock().unwrap();
-            pools.clone().unwrap()
-        };
+        let pool = Self::get_pools();
 
         let result = query.execute(&pool).await.map_err(|err| {
             let msg = format!("execute update error: {:#?}", err);
@@ -89,10 +86,7 @@ where
     where
         O: Send + Unpin + for<'r> FromRow<'r, MySqlRow> + Serialize + 'static,
     {
-        let pool = {
-            let pools = DATABASE_POOLS.lock().unwrap();
-            pools.clone().unwrap()
-        };
+        let pool = Self::get_pools();
 
         let results: Result<Vec<O>, String> = query.fetch_all(&pool).await.map_err(|err| {
             let msg = format!("query server list error: {:#?}", err);
@@ -107,5 +101,34 @@ where
             }
             Err(err) => Ok(get_error_response(&err)),
         };
+    }
+
+    /// 使用事务批量提交
+    async fn batch_commit<'a>(query_list: Vec<Query<'a, MySql, MySqlArguments>>) -> Result<HttpResponse, String> {
+        let pool = Self::get_pools();
+
+        // 开始事务
+        let mut tx: sqlx::Transaction<'_, MySql> = pool.begin().await.map_err(|err| {
+            let msg = format!("begin transaction error: {:?}", err);
+            error!("{}", &msg);
+            Error::Error(msg).to_string()
+        })?;
+
+        for query in query_list {
+            query.execute(&mut *tx).await.map_err(|err| {
+                let msg = format!("query error: {:?}", err);
+                error!("{}", &msg);
+                Error::Error(msg).to_string()
+            })?;
+        }
+
+        // 提交事务
+        tx.commit().await.map_err(|err| {
+            let msg = format!("commit transaction error: {:?}", err);
+            error!("{}", &msg);
+            Error::Error(msg).to_string()
+        })?;
+
+        Ok(get_success_response(Some(Value::Bool(true))))
     }
 }

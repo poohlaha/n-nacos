@@ -1,6 +1,6 @@
 //! 流水线导出列表
 
-use crate::database::interface::Treat;
+use crate::database::interface::{Treat, Treat2};
 use crate::prepare::HttpResponse;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::props::PipelineRunProps;
@@ -28,19 +28,19 @@ pub async fn get_pipeline_list(server_id: String, form: QueryForm) -> Result<Htt
     pipeline.server_id = server_id.to_string();
 
     let form_cloned = Arc::new(form.clone());
-    Task::task_param(pipeline, move |pipeline| Pipeline::get_query_list(pipeline, &*form_cloned)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::get_query_list(&*pipe, &*form_cloned).await }).await
 }
 
 /// 插入流水线
 #[tauri::command]
 pub async fn insert_pipeline(pipeline: Pipeline) -> Result<HttpResponse, String> {
-    Task::task_param::<Pipeline, _>(pipeline, |pipeline| Pipeline::insert(&pipeline)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::insert(&*pipe).await }).await
 }
 
 /// 更新流水线
 #[tauri::command]
 pub async fn update_pipeline(pipeline: Pipeline) -> Result<HttpResponse, String> {
-    Task::task_param::<Pipeline, _>(pipeline, |pipeline| Pipeline::update(&pipeline)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::update(&*pipe).await }).await
 }
 
 /// 删除流水线
@@ -49,8 +49,7 @@ pub async fn delete_pipeline(id: String, server_id: String) -> Result<HttpRespon
     let mut pipeline = Pipeline::default();
     pipeline.id = id.to_string();
     pipeline.server_id = server_id.to_string();
-
-    Task::task_param(pipeline, |pipeline| Pipeline::delete(pipeline)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::delete(&*pipe).await }).await
 }
 
 /// 获取流水线详情
@@ -60,19 +59,19 @@ pub async fn get_pipeline_detail(id: String, server_id: String) -> Result<HttpRe
     pipeline.id = id.to_string();
     pipeline.server_id = server_id.to_string();
 
-    Task::task_param(pipeline, |pipeline| Pipeline::get_by_id(&pipeline)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::get_by_id(&*pipe).await }).await
 }
 
 /// 运行流水线
 #[tauri::command]
 pub async fn pipeline_run(props: PipelineRunProps) -> Result<HttpResponse, String> {
-    Task::task_param(props.clone(), |pipeline| PipelineRunnable::exec(pipeline)).await
+    Task::task_param_future::<PipelineRunProps, _, _>(props.clone(), |pipe| async move { PipelineRunnable::exec(&*pipe).await }).await
 }
 
 /// 批量运行流水线
 #[tauri::command]
 pub async fn pipeline_batch_run(list: Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
-    Task::task_batch_param(list, move |list| PipelineRunnable::batch_exec(list.clone())).await
+    Task::task_batch_param(list, |l| async move { PipelineRunnable::batch_exec(&*l).await }).await
 }
 
 /// 查询系统已安装的 commands 列表
@@ -87,6 +86,5 @@ pub async fn clear_run_history(id: String, server_id: String) -> Result<HttpResp
     let mut pipeline = Pipeline::default();
     pipeline.id = id.to_string();
     pipeline.server_id = server_id.to_string();
-
-    Task::task_param(pipeline, move |pipeline| Pipeline::clear_run_history(pipeline)).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::clear_run_history(&*pipe).await }).await
 }

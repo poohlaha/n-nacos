@@ -2,14 +2,20 @@
 
 use crate::server::pipeline::index::Pipeline;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 /// 基本信息
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineBasic {
-    pub(crate) name: String,
-    pub(crate) tag: PipelineTag,
-    pub(crate) path: String,
-    pub(crate) desc: String,
+    pub(crate) id: String,
+    pub(crate) pipeline_id: String, // 流水线ID
+    pub(crate) name: String, // 名称
+    pub(crate) tag: PipelineTag, // 标签
+    pub(crate) path: String, // 项目路径
+    #[serde(rename = "desc")]
+    pub(crate) description: String, // 描述
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 impl PipelineBasic {
@@ -19,40 +25,58 @@ impl PipelineBasic {
 }
 
 /// 流程配置
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineProcessConfig {
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PipelineProcess {
+    pub(crate) id: String,
     pub(crate) stages: Vec<PipelineStage>,
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线阶段, 一个阶段包括多个分组
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStage {
+    pub(crate) id: String,
+    pub(crate) process_id: String,
     pub(crate) groups: Vec<PipelineGroup>,
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线分组
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineGroup {
+    pub(crate) id: String,
+    pub(crate) stage_id: String,
     pub(crate) title: String,
     pub(crate) steps: Vec<PipelineStep>,
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线步骤
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStep {
     pub(crate) id: String,
+    pub(crate) group_id: String,
     pub(crate) module: PipelineCommandStatus,
     pub(crate) command: String,
     pub(crate) label: String,
     pub(crate) status: PipelineStatus,
     pub(crate) components: Vec<PipelineStepComponent>,
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线步骤组件
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStepComponent {
+    pub(crate) id: String,
+    pub(crate) step_id: String,
     pub(crate) prop: String,
     pub(crate) value: String,
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线运行命令状态
@@ -74,26 +98,30 @@ impl Default for PipelineCommandStatus {
     }
 }
 
-impl PipelineProcessConfig {
-    pub(crate) fn is_empty(config: &PipelineProcessConfig) -> bool {
+impl PipelineProcess {
+    pub(crate) fn is_empty(config: &PipelineProcess) -> bool {
         return config.stages.is_empty();
     }
 }
 
 /// 启动变量
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineVariable {
     pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) genre: String,
-    pub(crate) value: String,
-    pub(crate) disabled: String,
-    pub(crate) require: String,
-    pub(crate) desc: String,
+    pub(crate) pipeline_id: String,
+    pub(crate) name: String, // 变量名
+    pub(crate) genre: String, // 变量类型
+    pub(crate) value: String, // 值
+    pub(crate) disabled: String, // 是否禁用
+    pub(crate) require: String, // 是否必填
+    #[serde(rename = "desc")]
+    pub(crate) description: String, // 描述
+    pub(crate) create_time: Option<String>,
+    pub(crate) update_time: Option<String>,
 }
 
 /// 启动变量选中
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineSelectedVariable {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -107,7 +135,7 @@ impl PipelineVariable {
 }
 
 /// 附加的变量
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ExtraVariable {
     pub(crate) branches: Vec<String>,
     pub(crate) h5: Option<H5ExtraVariable>,
@@ -116,7 +144,7 @@ pub struct ExtraVariable {
 }
 
 /// 附加的 H5 变量
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct H5ExtraVariable {
     #[serde(rename = "displayFields")]
     pub(crate) display_fields: Vec<DisplayField>,
@@ -130,7 +158,7 @@ pub struct H5ExtraVariable {
     pub(crate) package_commands: Vec<String>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DisplayField {
     pub(crate) label: String,
     pub(crate) value: String,
@@ -141,7 +169,7 @@ pub struct DisplayField {
 }
 
 /// 附加的选中的 H5 变量
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct H5ExtraSelectedVariable {
     #[serde(rename = "makeCommand")]
     pub(crate) make_command: Option<String>,
@@ -162,6 +190,7 @@ pub enum PipelineStatus {
     Stop,    // 中止运行
 }
 
+
 impl Default for PipelineStatus {
     fn default() -> Self {
         PipelineStatus::No
@@ -169,32 +198,32 @@ impl Default for PipelineStatus {
 }
 
 impl PipelineStatus {
-    pub fn get(status: &str) -> Option<PipelineStatus> {
+    pub fn get(status: &str) -> PipelineStatus {
         if status == "No" {
-            return Some(PipelineStatus::No);
+            return PipelineStatus::No;
         }
 
         if status == "Queue" {
-            return Some(PipelineStatus::Queue);
+            return PipelineStatus::Queue;
         }
 
         if status == "Process" {
-            return Some(PipelineStatus::Process);
+            return PipelineStatus::Process;
         }
 
         if status == "Success" {
-            return Some(PipelineStatus::Success);
+            return PipelineStatus::Success;
         }
 
         if status == "Failed" {
-            return Some(PipelineStatus::Failed);
+            return PipelineStatus::Failed;
         }
 
         if status == "Stop" {
-            return Some(PipelineStatus::Stop);
+            return PipelineStatus::Stop;
         }
 
-        None
+        PipelineStatus::No
     }
 
     pub fn got(status: PipelineStatus) -> String {
@@ -210,7 +239,7 @@ impl PipelineStatus {
 }
 
 /// 流水线运行属性
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineRunVariable {
     #[serde(rename = "projectName")]
     pub(crate) project_name: String, // 名称
@@ -221,7 +250,7 @@ pub struct PipelineRunVariable {
 }
 
 /// 当前运行流水线
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineCurrentRun {
     pub(crate) order: u32,                     // 顺序
     pub(crate) stage: PipelineCurrentRunStage, // stage 运行到哪一步
@@ -234,7 +263,7 @@ pub struct PipelineCurrentRun {
 }
 
 /// 当前流水线步骤
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineCurrentRunStage {
     pub(crate) index: u32, // stage 运行到哪一步, 从 1 开始计算
     #[serde(rename = "groupIndex")]
@@ -248,7 +277,7 @@ pub struct PipelineCurrentRunStage {
 }
 
 /// 流水线运行时的属性
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineRunProps {
     pub(crate) id: String, // 流水线ID,
     #[serde(rename = "serverId")]
@@ -303,14 +332,14 @@ impl PipelineTag {
 }
 
 /// 系统命令集
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct OsCommands {
     #[serde(rename = "h5InstalledCommands")]
     pub(crate) h5_installed_commands: Vec<String>,
 }
 
 /// 执行任务
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStageTask {
     pub(crate) id: String,
     pub(crate) server_id: String,
@@ -321,7 +350,7 @@ pub struct PipelineStageTask {
 }
 
 /// 执行 step
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineRunnableStageStep {
     pub(crate) id: String,
     pub(crate) server_id: String,

@@ -1,6 +1,6 @@
 //! 流水线
 
-use crate::database::interface::{Treat, TreatBody};
+use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::database::Database;
 use crate::error::Error;
 use crate::exports::pipeline::QueryForm;
@@ -9,12 +9,16 @@ use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineCurrentRunStage, PipelineProcessConfig, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
+use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCurrentRun, PipelineCurrentRunStage, PipelineProcess, PipelineRunVariable, PipelineStatus, PipelineTag, PipelineVariable};
 use handlers::utils::Utils;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, MySql, Row};
 use std::path::PathBuf;
+use async_trait::async_trait;
+use sqlx::mysql::{MySqlArguments, MySqlRow};
 use uuid::Uuid;
+use crate::server::index::Server;
 
 /// 存储流水线数据库名称
 pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
@@ -27,37 +31,61 @@ pub struct Pipeline {
     pub(crate) id: String,
     #[serde(rename = "serverId")]
     pub(crate) server_id: String, // 服务器 ID
+    #[serde(rename = "lastRunTime")]
+    pub(crate) last_run_time: Option<String>, // 最后运行时间
+    pub(crate) status: PipelineStatus, // 状态, 同步于 steps
+    pub(crate) basic_id: String, // 基本信息 ID
+    pub(crate) basic: PipelineBasic, // 基本信息
+    pub(crate) process_id: String, // 流程配置 ID
+    #[serde(rename = "processConfig")]
+    pub(crate) process_config: PipelineProcess, // 流程配置
+    pub(crate) variables: Vec<PipelineVariable>, // 变量
+    pub(crate) extra: Option<ExtraVariable>, // 额外的信息
+    pub(crate) run: Option<PipelineRunVariable>, // 运行信息
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>, // 修改时间
-    #[serde(rename = "lastRunTime")]
-    pub(crate) last_run_time: Option<String>, // 最后运行时间
-    pub(crate) basic: PipelineBasic, // 基本信息
-    #[serde(rename = "processConfig")]
-    pub(crate) process_config: PipelineProcessConfig, // 流程配置
-    pub(crate) status: PipelineStatus, // 状态, 同步于 steps
-    pub(crate) variables: Vec<PipelineVariable>, // 变量
-    pub(crate) extra: Option<ExtraVariable>, // 额外的信息
-    pub(crate) run: Option<PipelineRunVariable>, // 运行信息
+}
+
+impl<'r> FromRow<'r, MySqlRow> for Pipeline {
+    fn from_row(row: &MySqlRow) -> Result<Self, sqlx::Error> {
+        let status_str: String = row.try_get("status")?;
+
+        Ok(Pipeline {
+            id: row.try_get("id")?,
+            server_id: row.try_get("server_id")?,
+            last_run_time: row.try_get("last_run_time")?,
+            status: PipelineStatus::get(&status_str),
+            basic_id: row.try_get("basic_id")?,
+            process_id: row.try_get("process_id")?,
+            create_time: row.try_get("create_time")?,
+            update_time: row.try_get("update_time")?,
+            basic: Default::default(),
+            process_config: Default::default(),
+            variables: Vec::new(),
+            extra: None,
+            run: None,
+        })
+    }
 }
 
 impl TreatBody for Pipeline {}
 
-impl Treat<HttpResponse> for Pipeline {
+#[async_trait]
+impl Treat2<HttpResponse> for Pipeline {
     type B = Pipeline;
 
     /// 列表
-    fn get_list(pipeline: &Self::B) -> Result<HttpResponse, String> {
+    async fn get_list(pipeline: &Self::B) -> Result<HttpResponse, String> {
         if pipeline.server_id.is_empty() {
             return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
         }
 
-        let response = Database::get_list::<Pipeline>(PIPELINE_DB_NAME, &Self::get_pipeline_name(&pipeline.server_id))?;
-        if response.code != 200 {
-            return Ok(response.clone());
-        }
+        let query = sqlx::query_as::<_, Pipeline>("SELECT id, server_id, last_run_time, `status`, basic_id, process_id, create_time, update_time FROM pipeline ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC");
+        return Self::execute_query(query).await;
 
+        /*
         // 解析成 list, 添加其他属性
         let data: Vec<Pipeline> = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
         if data.is_empty() {
@@ -83,10 +111,11 @@ impl Treat<HttpResponse> for Pipeline {
 
         let result = serde_json::to_value(result).map_err(|err| Error::Error(err.to_string()).to_string())?;
         return Ok(get_success_response(Some(result)));
+         */
     }
 
     /// 插入
-    fn insert(pipeline: &Self::B) -> Result<HttpResponse, String> {
+    async fn insert(pipeline: &Self::B) -> Result<HttpResponse, String> {
         let res = Self::validate(&pipeline);
         if let Some(res) = res {
             return Ok(res);
@@ -119,7 +148,7 @@ impl Treat<HttpResponse> for Pipeline {
 
         info!("insert pipeline params: {:#?}", pipeline_clone);
 
-        let data = Self::get_pipeline_list(&pipeline);
+        let data = Self::get_pipeline_list(&pipeline).await;
         return match data {
             Ok(mut data) => {
                 if data.is_empty() {
@@ -146,14 +175,14 @@ impl Treat<HttpResponse> for Pipeline {
     }
 
     /// 更新
-    fn update(pipeline: &Self::B) -> Result<HttpResponse, String> {
+    async fn update(pipeline: &Self::B) -> Result<HttpResponse, String> {
         let res = Self::validate(&pipeline);
         if let Some(res) = res {
             return Ok(res);
         }
 
         info!("update pipeline params: {:#?}", pipeline);
-        let data = Self::get_pipeline_list(&pipeline);
+        let data = Self::get_pipeline_list(&pipeline).await;
         return match data {
             Ok(data) => {
                 if data.is_empty() {
@@ -201,7 +230,7 @@ impl Treat<HttpResponse> for Pipeline {
     }
 
     /// 删除
-    fn delete(pipeline: &Self::B) -> Result<HttpResponse, String> {
+    async fn delete(pipeline: &Self::B) -> Result<HttpResponse, String> {
         if pipeline.id.is_empty() {
             return Ok(get_error_response("删除流水线失败, `id` 不能为空"));
         }
@@ -214,32 +243,20 @@ impl Treat<HttpResponse> for Pipeline {
         let server_id = &pipeline.server_id;
         info!("delete pipeline id: {}, server_id: {}", &id, &server_id);
 
-        let data = Self::get_pipeline_list(&pipeline);
-        return match data {
-            Ok(data) => {
-                if data.is_empty() {
-                    return Ok(get_error_response("删除流水线失败, 该流水线不存在"));
-                }
+        let query = sqlx::query::<MySql>("delete from pipeline where id = ? and server_id = ?").bind(&id).bind(&server_id);
+        let mut response = Self::execute_update(query).await?;
+        if response.code != 200 {
+            response.error = String::from("删除服务器失败");
+            return Ok(response);
+        }
 
-                let pipeline = data.iter().find(|s| s.id.as_str() == id.as_str());
-                if pipeline.is_none() {
-                    return Ok(get_error_response("删除流水线失败, 该流水线不存在"));
-                }
-
-                let pipelines: Vec<Pipeline> = data.iter().filter_map(|s| if s.id.as_str() == id.as_str() { None } else { Some(s.clone()) }).collect();
-
-                // 删除流水线日志
-                PipelineLogger::delete_log_by_id(&server_id, &id);
-
-                // 更新数据库
-                Database::update::<Pipeline>(PIPELINE_DB_NAME, &Self::get_pipeline_name(&server_id), pipelines, "删除流水线失败")
-            }
-            Err(_) => Ok(get_error_response("删除流水线失败")),
-        };
+        // 删除流水线日志
+        PipelineLogger::delete_log_by_id(&server_id, &id);
+        return Ok(response)
     }
 
     /// 根据 ID 查找数据
-    fn get_by_id(pipeline: &Self::B) -> Result<HttpResponse, String> {
+    async fn get_by_id(pipeline: &Self::B) -> Result<HttpResponse, String> {
         if pipeline.id.is_empty() {
             return Ok(get_error_response("根据 ID 查找流水线失败, `id` 不能为空"));
         }
@@ -249,61 +266,77 @@ impl Treat<HttpResponse> for Pipeline {
         }
 
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let data = Self::get_pipeline_list(&pipeline);
-        return match data {
-            Ok(data) => {
-                if data.is_empty() {
-                    return Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"));
+        let query = sqlx::query_as::<_, Server>("select * from pipeline where id = ? and server_id = ?").bind(&pipeline.id).bind(&pipeline.server_id);
+        let mut response =  Self::execute_query(query).await?;
+        if response.code != 200 {
+            response.error = String::from("根据 ID 查找流水线失败");
+            return Ok(response);
+        }
+
+        let data: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if data.is_empty() {
+            return Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"));
+        }
+
+        let pipe = data.get(0).unwrap();
+        let mut pipeline = pipe.clone();
+        if let Some(mut run) = pipeline.run.clone() {
+            let mut current = run.current.clone();
+            // 读取日志
+            let log = PipelineLogger::read_log(&pipeline.server_id, &pipeline.id, current.order);
+            match log {
+                Ok(content) => {
+                    current.log = content;
+                    run.current = current;
+                    pipeline.run = Some(run);
                 }
-
-                let pipe = data.iter().find(|s| &s.id == &pipeline.id);
-                if let Some(pipe) = pipe {
-                    let mut pipeline = pipe.clone();
-                    if let Some(mut run) = pipeline.run.clone() {
-                        let mut current = run.current.clone();
-                        // 读取日志
-                        let log = PipelineLogger::read_log(&pipeline.server_id, &pipeline.id, current.order);
-                        match log {
-                            Ok(content) => {
-                                current.log = content;
-                                run.current = current;
-                                pipeline.run = Some(run);
-                            }
-                            Err(err) => {
-                                info!("read pipeline log error: {}", &err)
-                            }
-                        }
-                    }
-
-                    let data = serde_json::to_value(pipeline).map_err(|err| Error::Error(err.to_string()).to_string())?;
-                    return Ok(get_success_response(Some(data)));
+                Err(err) => {
+                    info!("read pipeline log error: {}", &err)
                 }
-
-                Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"))
             }
-            Err(_) => Ok(get_error_response("根据 ID 查找流水线失败")),
-        };
+        }
+
+        let data = serde_json::to_value(pipeline).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        return Ok(get_success_response(Some(data)));
     }
 }
 
 impl Pipeline {
     /// 根据条件查询列表
-    pub(crate) fn get_query_list(pipeline: &Pipeline, form: &QueryForm) -> Result<HttpResponse, String> {
+    pub(crate) async fn get_query_list(pipeline: &Pipeline, form: &QueryForm) -> Result<HttpResponse, String> {
         if QueryForm::is_empty(form) {
-            return Self::get_list(pipeline);
+            return Self::get_list(pipeline).await;
         }
 
-        let data = Self::get_pipeline_list(pipeline)?;
-        if data.is_empty() {
-            let data = serde_json::to_value(data).map_err(|err| Error::Error(err.to_string()).to_string())?;
-            return Ok(get_success_response(Some(data)));
-        }
+        let query: sqlx::query::QueryAs<'_, MySql, Pipeline, MySqlArguments> = sqlx::query_as::<_, Pipeline>(r#"
+            SELECT
+                p.id,
+                p.server_id,
+                p.last_run_time,
+                p.status,
+                p.basic_id,
+                p.process_id,
+                p.create_time,
+                p.update_time,
+                b.name
+            FROM
+                pipeline p
+            LEFT JOIN pipeline_basic b
+            ON p.basic_id = b.id
+            WHERE
+                b.`name` LIKE '%?' and p.`status` = '?'
+            ORDER BY
+            CASE
+                    WHEN p.update_time IS NULL THEN
+                    0 ELSE 1
+                END DESC,
+                p.update_time DESC,
+                p.create_time DESC
+        "#)
+            .bind(&form.name)
+            .bind(&form.status);
 
-        // 根据条件过滤
-        let data: Vec<Pipeline> = data.iter().filter_map(|pipe| Self::find_pipeline_by_form(form, pipe)).collect();
-
-        let data = serde_json::to_value(data).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        return Ok(get_success_response(Some(data)));
+        return Self::execute_query(query).await;
     }
 
     fn find_pipeline_by_form(form: &QueryForm, pipeline: &Pipeline) -> Option<Pipeline> {
@@ -338,8 +371,8 @@ impl Pipeline {
     }
 
     /// 获取流水线列表
-    pub(crate) fn get_pipeline_list(pipeline: &Pipeline) -> Result<Vec<Pipeline>, String> {
-        let response = Pipeline::get_list(&pipeline)?;
+    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline) -> Result<Vec<Pipeline>, String> {
+        let response = Pipeline::get_list(&pipeline).await?;
         if response.code != 200 {
             return Err(Error::convert_string(&response.error));
         }
@@ -367,7 +400,7 @@ impl Pipeline {
             return Some(get_error_response("更新流水线失败, `basic` 中 `ip`、 `tag` or `path` 不能为空"));
         }
 
-        if PipelineProcessConfig::is_empty(process_config) {
+        if PipelineProcess::is_empty(process_config) {
             return Some(get_error_response("更新流水线失败, `process_config` 中 `steps` 不能为空"));
         }
 
@@ -465,15 +498,15 @@ impl Pipeline {
     }
 
     /// 清空运行历史, 删除流水线运行日志记录
-    pub(crate) fn clear_run_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
-        let res = Pipeline::get_by_id(&pipeline)?;
+    pub(crate) async fn clear_run_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
+        let res = Pipeline::get_by_id(&pipeline).await?;
         let mut pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
         let run = pipeline.run;
         if let Some(run) = run {
             let mut run_cloned = run.clone();
             run_cloned.history_list = Vec::new();
             pipeline.run = Some(run_cloned);
-            let response = Self::update(&pipeline);
+            let response = Self::update(&pipeline).await;
             return match response {
                 Ok(_) => {
                     // 删除流水线日志

@@ -2,7 +2,7 @@
 
 pub(crate) mod stage;
 
-use crate::database::interface::Treat;
+use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::logger::pipeline::PipelineLogger;
@@ -24,7 +24,7 @@ pub struct PipelineRunnable;
 
 impl PipelineRunnable {
     /// 添加到线程池中,需要过滤重复数据,以最后一条为主
-    pub(crate) fn exec(props: &PipelineRunProps) -> Result<HttpResponse, String> {
+    pub(crate) async fn exec(props: &PipelineRunProps) -> Result<HttpResponse, String> {
         if props.id.is_empty() {
             return Ok(get_error_response("运行流水线失败, `id` 不能为空"));
         }
@@ -38,7 +38,7 @@ impl PipelineRunnable {
         pipeline.server_id = props.server_id.clone();
 
         // 插入到线程池
-        Self::insert_into_pool(props, &pipeline)?;
+        Self::insert_into_pool(props, &pipeline).await?;
 
         // 更新线程池数据库
         let pools = POOLS.lock().unwrap();
@@ -49,10 +49,10 @@ impl PipelineRunnable {
     }
 
     /// 放入线程池
-    fn insert_into_pool(props: &PipelineRunProps, pipeline: &Pipeline) -> Result<(), String> {
+    async fn insert_into_pool(props: &PipelineRunProps, pipeline: &Pipeline) -> Result<(), String> {
         info!("insert into pool: {:#?}", props);
 
-        let res = Pipeline::get_by_id(&pipeline)?;
+        let res = Pipeline::get_by_id(&pipeline).await?;
         let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
         let run = pipeline.run;
@@ -116,6 +116,8 @@ impl PipelineRunnable {
         branch: Option<String>,
         insert_current_into_history: bool,
     ) -> Result<HttpResponse, String> {
+        Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"))
+        /*
         let data = Pipeline::get_pipeline_list(&pipeline);
         return match data {
             Ok(data) => {
@@ -208,13 +210,14 @@ impl PipelineRunnable {
             }
             Err(_) => Ok(get_error_response("运行流水线失败, 该流水线不存在")),
         };
+         */
     }
 }
 
 /// MARK: 并行任务
 impl PipelineRunnable {
     /// 批量执行
-    pub(crate) fn batch_exec(list: Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
+    pub(crate) async fn batch_exec(list: &Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
         if list.is_empty() {
             error!("batch exec pipeline list failed, `list` is empty !");
             return Ok(get_error_response("batch exec pipeline list failed, `list` is empty !"));
@@ -224,8 +227,9 @@ impl PipelineRunnable {
         let mut result: Vec<PipelineRunProps> = Vec::new();
 
         // 插入到线程池
-        list.iter().for_each(|props| {
-            match Self::exec(props) {
+        /*
+        list.iter().for_each(|props| async move {
+            match Self::exec(props).await {
                 Ok(_) => result.push(props.clone()),
                 Err(err) => {
                     error!("exec pipeline id: {} error: {}", &props.id, &err);
@@ -233,6 +237,7 @@ impl PipelineRunnable {
                 }
             };
         });
+         */
 
         if result.is_empty() {
             error!("exec pipeline list failed, no data need to batch run !");

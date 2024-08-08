@@ -44,13 +44,14 @@ impl Task {
     }
 
     /// 批量异步任务
-    pub(crate) async fn task_batch_param<T, F>(body: T, func: F) -> Result<HttpResponse, String>
+    pub(crate) async fn task_batch_param<T, F, Fut>(body: T, func: F) -> Result<HttpResponse, String>
     where
         T: DeserializeOwned + Serialize + Clone + Send + Sync + 'static,
-        F: FnOnce(&T) -> Result<HttpResponse, String> + Send + 'static,
+        F: FnOnce(Arc<T>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<HttpResponse, String>> + Send + 'static,
     {
         let body_cloned = Arc::new(body.clone());
-        let result = async_std::task::spawn(async move { func(&*body_cloned) });
+        let result = async_std::task::spawn(async move { func(body_cloned).await });
         return result.await;
     }
 }
