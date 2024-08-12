@@ -1,6 +1,6 @@
 //! 数据库接口
 
-use crate::prepare::{HttpResponseData};
+use crate::prepare::HttpResponseData;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

@@ -1,6 +1,5 @@
 //! 流水线
 
-use std::collections::HashMap;
 use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::database::Database;
@@ -12,15 +11,19 @@ use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable};
+use crate::server::pipeline::props::{
+    ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep,
+    PipelineStepComponent, PipelineTag, PipelineVariable,
+};
 use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::{FromRow, MySql, Row};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use serde_json::Value;
 use uuid::Uuid;
 
 /// 存储流水线数据库名称
@@ -36,11 +39,11 @@ pub struct Pipeline {
     pub(crate) server_id: String, // 服务器 ID
     #[serde(rename = "lastRunTime")]
     pub(crate) last_run_time: String, // 最后运行时间
-    pub(crate) tag: PipelineTag,            // 标签
+    pub(crate) tag: PipelineTag,       // 标签
     pub(crate) status: PipelineStatus, // 状态, 同步于 steps
-    pub(crate) duration: String,  // 运行时长, 单位秒
+    pub(crate) duration: String,       // 运行时长, 单位秒
 
-    pub(crate) basic: PipelineBasic,   // 基本信息
+    pub(crate) basic: PipelineBasic, // 基本信息
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcess, // 流程配置
     pub(crate) variables: Vec<PipelineVariable>, // 变量
@@ -101,7 +104,8 @@ impl Treat2<HttpResponse> for Pipeline {
             return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
         }
 
-        let query = sqlx::query(r#"
+        let query = sqlx::query(
+            r#"
             SELECT
                 p.id as pipeline_id,
                 p.server_id as pipeline_server_id,
@@ -181,11 +185,12 @@ impl Treat2<HttpResponse> for Pipeline {
             END DESC,
             p.update_time DESC,
             p.create_time DESC
-        "#);
+        "#,
+        );
 
         let rows = DBHelper::execute_rows(query).await?;
         if rows.is_empty() {
-            return Ok(get_success_response(Some(Value::Array(Vec::new()))))
+            return Ok(get_success_response(Some(Value::Array(Vec::new()))));
         }
 
         // 组装数据

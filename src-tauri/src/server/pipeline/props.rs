@@ -9,9 +9,9 @@ use sqlx::FromRow;
 pub struct PipelineBasic {
     pub(crate) id: String,
     pub(crate) pipeline_id: String, // 流水线ID
-    pub(crate) name: String,                // 名称
-    pub(crate) tag: PipelineTag,            // 标签
-    pub(crate) path: String,                // 项目路径
+    pub(crate) name: String,        // 名称
+    pub(crate) tag: PipelineTag,    // 标签
+    pub(crate) path: String,        // 项目路径
     #[serde(rename = "desc")]
     pub(crate) description: String, // 描述
     pub(crate) create_time: Option<String>,
