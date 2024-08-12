@@ -55,6 +55,7 @@ impl PipelineRunnable {
         let res = Pipeline::get_by_id(&pipeline).await?;
         let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
+        /*
         let run = pipeline.run;
         if run.is_none() {
             let msg = "insert into pool failed, `run` prop is empty !";
@@ -70,14 +71,17 @@ impl PipelineRunnable {
             error!("{}", msg);
             return Err(Error::convert_string(msg));
         }
+         */
 
         let task = PipelineStageTask {
             id: pipeline.id.clone(),
             server_id: pipeline.server_id.clone(),
             tag: pipeline.basic.tag.clone(),
-            stages: stages.clone(),
+            // stages: stages.clone(),
+            stages: Vec::new(),
             props: props.clone(),
-            order: current.order,
+            // order: current.order,
+            order: 1,
         };
         info!("pool task: {:#?}", task);
 

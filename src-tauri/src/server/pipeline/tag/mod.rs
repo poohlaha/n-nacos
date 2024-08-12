@@ -2,6 +2,7 @@
 
 use crate::database::helper::DBHelper;
 use crate::prepare::HttpResponse;
+use log::info;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -22,6 +23,7 @@ pub struct PipelineTagQueryForm {
 
 impl PipelineTag {
     pub(crate) async fn get_list(form: PipelineTagQueryForm) -> Result<HttpResponse, String> {
+        info!("query tag form: {:?}", form);
         let query;
 
         if !form.value.is_empty() && !form.id.is_empty() {

@@ -6,6 +6,7 @@ use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::props::PipelineRunProps;
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::task::Task;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -34,6 +35,7 @@ pub async fn get_pipeline_list(server_id: String, form: QueryForm) -> Result<Htt
 /// 插入流水线
 #[tauri::command]
 pub async fn insert_pipeline(pipeline: Pipeline) -> Result<HttpResponse, String> {
+    info!("insert_pipeline: {:#?}", pipeline);
     Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::insert(&*pipe).await }).await
 }
 

@@ -90,6 +90,7 @@ impl PipelineRunnableStage {
             return;
         }
 
+        /*
         let run = &pipeline.run;
         if run.is_none() {
             PipelineRunnable::exec_end_log(app, &pipeline, &task.props, Some(error_stage.clone()), false, "run steps failed, `run` prop is empty !", task.order, Some(PipelineStatus::Failed));
@@ -98,6 +99,7 @@ impl PipelineRunnableStage {
 
         let run = run.clone().unwrap();
         let order = run.current.order;
+         */
 
         info!("installed_commands: {:#?}", installed_commands);
 
@@ -105,7 +107,8 @@ impl PipelineRunnableStage {
         let mut has_error: bool = false;
         let mut error_step: Option<PipelineRunnableStageStep> = None;
         for step in steps.iter() {
-            let result = Self::exec_step(app, &pipe, &task.props, step, installed_commands.clone(), order);
+            // let result = Self::exec_step(app, &pipe, &task.props, step, installed_commands.clone(), order);
+            let result = Self::exec_step(app, &pipe, &task.props, step, installed_commands.clone(), 1);
 
             match result {
                 Ok((success, pipeline)) => {
@@ -127,7 +130,7 @@ impl PipelineRunnableStage {
                     error_step = Some(step.clone());
                     let msg = format!("exec step error: {}", &err);
                     error!("{}", &msg);
-                    PipelineRunnable::exec_end_log(app, &pipeline, &task.props, Some(error_stage.clone()), false, &msg, order, Some(PipelineStatus::Failed));
+                    // PipelineRunnable::exec_end_log(app, &pipeline, &task.props, Some(error_stage.clone()), false, &msg, order, Some(PipelineStatus::Failed));
                     break;
                 }
             }

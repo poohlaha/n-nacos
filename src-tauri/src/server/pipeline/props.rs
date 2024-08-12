@@ -8,10 +8,10 @@ use sqlx::FromRow;
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineBasic {
     pub(crate) id: String,
-    pub(crate) pipeline_id: String, // 流水线ID
-    pub(crate) name: String,        // 名称
-    pub(crate) tag: PipelineTag,    // 标签
-    pub(crate) path: String,        // 项目路径
+    pub(crate) pipeline_id: Option<String>, // 流水线ID
+    pub(crate) name: String,                // 名称
+    pub(crate) tag: PipelineTag,            // 标签
+    pub(crate) path: String,                // 项目路径
     #[serde(rename = "desc")]
     pub(crate) description: String, // 描述
     pub(crate) create_time: Option<String>,
@@ -28,9 +28,12 @@ impl PipelineBasic {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineProcess {
     pub(crate) id: String,
+    #[serde(rename = "pipelineId")]
     pub(crate) pipeline_id: String,
     pub(crate) stages: Vec<PipelineStage>,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
 }
 
@@ -38,9 +41,12 @@ pub struct PipelineProcess {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStage {
     pub(crate) id: String,
+    #[serde(rename = "processId")]
     pub(crate) process_id: String,
     pub(crate) groups: Vec<PipelineGroup>,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
 }
 
@@ -48,10 +54,13 @@ pub struct PipelineStage {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineGroup {
     pub(crate) id: String,
+    #[serde(rename = "stageId")]
     pub(crate) stage_id: String,
     pub(crate) title: String,
     pub(crate) steps: Vec<PipelineStep>,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
 }
 
@@ -59,13 +68,16 @@ pub struct PipelineGroup {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStep {
     pub(crate) id: String,
+    #[serde(rename = "groupId")]
     pub(crate) group_id: String,
     pub(crate) module: PipelineCommandStatus,
     pub(crate) command: String,
     pub(crate) label: String,
     pub(crate) status: PipelineStatus,
     pub(crate) components: Vec<PipelineStepComponent>,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
 }
 
@@ -73,10 +85,13 @@ pub struct PipelineStep {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineStepComponent {
     pub(crate) id: String,
+    #[serde(rename = "stepId")]
     pub(crate) step_id: String,
     pub(crate) prop: String,
     pub(crate) value: String,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
 }
 
@@ -99,6 +114,57 @@ impl Default for PipelineCommandStatus {
     }
 }
 
+impl PipelineCommandStatus {
+    pub fn get(status: &str) -> PipelineCommandStatus {
+        if status == "None" {
+            return PipelineCommandStatus::None;
+        }
+
+        if status == "GitPull" {
+            return PipelineCommandStatus::GitPull;
+        }
+
+        if status == "H5Install" {
+            return PipelineCommandStatus::H5Install;
+        }
+
+        if status == "Pack" {
+            return PipelineCommandStatus::Pack;
+        }
+
+        if status == "Minimize" {
+            return PipelineCommandStatus::Minimize;
+        }
+
+        if status == "Compress" {
+            return PipelineCommandStatus::Compress;
+        }
+
+        if status == "Deploy" {
+            return PipelineCommandStatus::Deploy;
+        }
+
+        if status == "Notice" {
+            return PipelineCommandStatus::Notice;
+        }
+
+        PipelineCommandStatus::None
+    }
+
+    pub fn got(status: PipelineCommandStatus) -> String {
+        return match status {
+            PipelineCommandStatus::None => "None".to_string(),
+            PipelineCommandStatus::GitPull => "GitPull".to_string(),
+            PipelineCommandStatus::H5Install => "H5Install".to_string(),
+            PipelineCommandStatus::Pack => "Pack".to_string(),
+            PipelineCommandStatus::Minimize => "Minimize".to_string(),
+            PipelineCommandStatus::Compress => "Compress".to_string(),
+            PipelineCommandStatus::Deploy => "Deploy".to_string(),
+            PipelineCommandStatus::Notice => "Notice".to_string(),
+        };
+    }
+}
+
 impl PipelineProcess {
     pub(crate) fn is_empty(config: &PipelineProcess) -> bool {
         return config.stages.is_empty();
@@ -109,7 +175,7 @@ impl PipelineProcess {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineVariable {
     pub(crate) id: String,
-    pub(crate) pipeline_id: String,
+    pub(crate) pipeline_id: Option<String>,
     pub(crate) name: String,     // 变量名
     pub(crate) genre: String,    // 变量类型
     pub(crate) value: String,    // 值
