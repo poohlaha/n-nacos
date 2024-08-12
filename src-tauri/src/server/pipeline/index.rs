@@ -1,5 +1,6 @@
 //! 流水线
 
+use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::database::Database;
 use crate::error::Error;
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::{FromRow, MySql, Row};
 use std::path::PathBuf;
+use tauri::http::response;
 use uuid::Uuid;
 
 /// 存储流水线数据库名称
@@ -34,9 +36,7 @@ pub struct Pipeline {
     #[serde(rename = "lastRunTime")]
     pub(crate) last_run_time: Option<String>, // 最后运行时间
     pub(crate) status: PipelineStatus, // 状态, 同步于 steps
-    pub(crate) basic_id: String,       // 基本信息 ID
     pub(crate) basic: PipelineBasic,   // 基本信息
-    pub(crate) process_id: String,     // 流程配置 ID
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcess, // 流程配置
     pub(crate) variables: Vec<PipelineVariable>, // 变量
@@ -57,8 +57,6 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
             server_id: row.try_get("server_id")?,
             last_run_time: row.try_get("last_run_time")?,
             status: PipelineStatus::get(&status_str),
-            basic_id: row.try_get("basic_id")?,
-            process_id: row.try_get("process_id")?,
             create_time: row.try_get("create_time")?,
             update_time: row.try_get("update_time")?,
             basic: Default::default(),
@@ -85,7 +83,7 @@ impl Treat2<HttpResponse> for Pipeline {
         let query = sqlx::query_as::<_, Pipeline>(
             "SELECT id, server_id, last_run_time, `status`, basic_id, process_id, create_time, update_time FROM pipeline ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
         );
-        return Self::execute_query(query).await;
+        return DBHelper::execute_query(query).await;
 
         /*
         // 解析成 list, 添加其他属性
@@ -129,7 +127,89 @@ impl Treat2<HttpResponse> for Pipeline {
         }
 
         // 创建时间
-        pipeline_clone.create_time = Some(Utils::get_date(None));
+        let create_time = Utils::get_date(None);
+
+        let basic = &pipeline_clone.basic;
+
+        let response = crate::server::pipeline::tag::PipelineTag::get_list(crate::server::pipeline::tag::PipelineTagQueryForm {
+            value: PipelineTag::got(basic.tag.clone()),
+            id: "".to_string(),
+        })
+        .await?;
+
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let data: Vec<crate::server::pipeline::tag::PipelineTag> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if !data.is_empty() {
+            return Ok(get_error_response("保存流水线失败, 该标签不存在"));
+        }
+
+        let tag = data.get(0).unwrap();
+
+        let mut query_list = Vec::new();
+
+        // 插入 pipeline 表
+        let pipeline_query = sqlx::query::<MySql>(
+            r#"
+            INSERT INTO pipeline (id, server_id, last_run_time, status, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?)
+        "#,
+        )
+        .bind(&pipeline_clone.id)
+        .bind(&pipeline_clone.server_id)
+        .bind("")
+        .bind(PipelineStatus::got(PipelineStatus::No))
+        .bind(&create_time)
+        .bind(&pipeline_clone.update_time);
+        query_list.push(pipeline_query);
+
+        // 插入 pipeline_basic 表
+        let basic_query = sqlx::query::<MySql>(
+            r#"
+            INSERT INTO pipeline_basic (id, pipeline_id, name, tag_id, path, description, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        )
+        .bind(Uuid::new_v4().to_string().clone())
+        .bind(&pipeline_clone.id)
+        .bind(&basic.name)
+        .bind(&tag.id)
+        .bind(&basic.path)
+        .bind(&basic.description)
+        .bind(&create_time)
+        .bind(&basic.update_time);
+        query_list.push(basic_query);
+
+        // 解析 process_config
+        let process_config = &pipeline_clone.process_config;
+
+        // 插入 pipeline_variable 表
+        let variables = &pipeline_clone.variables;
+        if !variables.is_empty() {
+            for variable in variables.iter() {
+                let variable_query = sqlx::query::<MySql>(
+                    r#"
+            INSERT INTO pipeline_variable (id, pipeline_id, name, genre, value, disabled, require, description, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+                )
+                .bind(Uuid::new_v4().to_string().clone())
+                .bind(&pipeline_clone.id)
+                .bind(&variable.name)
+                .bind(&variable.genre)
+                .bind(&variable.value)
+                .bind(&variable.disabled)
+                .bind(&variable.require)
+                .bind(&variable.description)
+                .bind(&create_time)
+                .bind(&basic.update_time);
+                query_list.push(variable_query);
+            }
+        }
+
+        DBHelper::batch_commit(query_list).await?;
 
         // 设置运行时属性
         let mut run_variable = PipelineRunVariable::default();
@@ -246,7 +326,7 @@ impl Treat2<HttpResponse> for Pipeline {
         info!("delete pipeline id: {}, server_id: {}", &id, &server_id);
 
         let query = sqlx::query::<MySql>("delete from pipeline where id = ? and server_id = ?").bind(&id).bind(&server_id);
-        let mut response = Self::execute_update(query).await?;
+        let mut response = DBHelper::execute_update(query).await?;
         if response.code != 200 {
             response.error = String::from("删除服务器失败");
             return Ok(response);
@@ -269,7 +349,7 @@ impl Treat2<HttpResponse> for Pipeline {
 
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
         let query = sqlx::query_as::<_, Server>("select * from pipeline where id = ? and server_id = ?").bind(&pipeline.id).bind(&pipeline.server_id);
-        let mut response = Self::execute_query(query).await?;
+        let mut response = DBHelper::execute_query(query).await?;
         if response.code != 200 {
             response.error = String::from("根据 ID 查找流水线失败");
             return Ok(response);
@@ -340,7 +420,7 @@ impl Pipeline {
         .bind(&form.name)
         .bind(&form.status);
 
-        return Self::execute_query(query).await;
+        return DBHelper::execute_query(query).await;
     }
 
     fn find_pipeline_by_form(form: &QueryForm, pipeline: &Pipeline) -> Option<Pipeline> {

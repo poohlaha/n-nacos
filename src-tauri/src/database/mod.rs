@@ -16,6 +16,7 @@ use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 use std::sync::{Arc, Mutex};
 
+pub(crate) mod helper;
 pub(crate) mod interface;
 
 pub struct Database;
@@ -165,16 +166,6 @@ impl Database {
                 .await
                 .map_err(|err| Error::Error(format!("connect to {url} error: {:#?} !", err)).to_string())?;
             *pipeline_db = Some(database_pool)
-        }
-
-        Ok(())
-    }
-
-    /// 增加，修改，删除 - 需要写sql语句
-    pub(crate) async fn execute<T>(sql: &str) -> Result<(), String> {
-        let pool = DATABASE_POOLS.lock().unwrap();
-        if let Some(pool) = &*pool {
-            sqlx::query(sql).execute(pool).await.map_err(|err| Error::Error(err.to_string()).to_string())?;
         }
 
         Ok(())

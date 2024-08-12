@@ -28,6 +28,7 @@ impl PipelineBasic {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineProcess {
     pub(crate) id: String,
+    pub(crate) pipeline_id: String,
     pub(crate) stages: Vec<PipelineStage>,
     pub(crate) create_time: Option<String>,
     pub(crate) update_time: Option<String>,
@@ -326,6 +327,20 @@ impl PipelineTag {
             PipelineTag::Android => false,
             PipelineTag::Ios => false,
             PipelineTag::H5 => false,
+        };
+    }
+
+    pub fn got(tag: PipelineTag) -> String {
+        return match tag {
+            PipelineTag::None => "None".to_string(),
+            PipelineTag::Develop => "Develop".to_string(),
+            PipelineTag::Test => "Test".to_string(),
+            PipelineTag::CAddAdd => "C++".to_string(),
+            PipelineTag::Rust => "Rust".to_string(),
+            PipelineTag::Java => "Java".to_string(),
+            PipelineTag::Android => "Android".to_string(),
+            PipelineTag::Ios => "Ios".to_string(),
+            PipelineTag::H5 => "H5".to_string(),
         };
     }
 }

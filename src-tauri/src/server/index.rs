@@ -1,5 +1,6 @@
 //! 服务器
 
+use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::error::Error;
 use crate::logger::server::ServerLogger;
@@ -59,7 +60,7 @@ impl Treat2<HttpResponse> for Server {
 
         // 判断 IP 是否存在
         let query = sqlx::query_as::<_, Server>("select ip from server where ip = ?").bind(&server.ip);
-        let mut result = Self::execute_query(query).await?;
+        let mut result = DBHelper::execute_query(query).await?;
         if result.code != 200 {
             result.error = String::from("保存服务器失败");
             return Ok(result);
@@ -80,7 +81,7 @@ impl Treat2<HttpResponse> for Server {
             .bind(&server_clone.description)
             .bind(&server_clone.create_time)
             .bind(&server_clone.update_time);
-        return Self::execute_update(query).await;
+        return DBHelper::execute_update(query).await;
     }
 
     /// 获取 服务器列表
@@ -88,7 +89,7 @@ impl Treat2<HttpResponse> for Server {
         let query = sqlx::query_as::<_, Server>(
             "SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
         );
-        return Self::execute_query(query).await;
+        return DBHelper::execute_query(query).await;
     }
 
     /// 更新服务器
@@ -122,7 +123,7 @@ impl Treat2<HttpResponse> for Server {
             .bind(&server.ip)
             .bind(&serve.id);
 
-        let mut result = Self::execute_query(query).await?;
+        let mut result = DBHelper::execute_query(query).await?;
         if result.code != 200 {
             result.error = String::from("更新服务器失败");
             return Ok(result);
@@ -143,7 +144,7 @@ impl Treat2<HttpResponse> for Server {
             .bind(&server_clone.update_time)
             .bind(&serve.id);
 
-        return Self::execute_update(query).await;
+        return DBHelper::execute_update(query).await;
     }
 
     /// 删除服务器
@@ -167,7 +168,7 @@ impl Treat2<HttpResponse> for Server {
 
         let serve = data.get(0).unwrap();
         let query = sqlx::query::<MySql>("delete from server where id = ?").bind(&serve.id);
-        let result = Self::execute_update(query).await?;
+        let result = DBHelper::execute_update(query).await?;
 
         // 删除流水线
         Pipeline::clear(&id)?;
@@ -186,7 +187,7 @@ impl Treat2<HttpResponse> for Server {
 
         info!("get server by id: {}", &server.id);
         let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where id = ?").bind(&server.id);
-        return Self::execute_query(query).await;
+        return DBHelper::execute_query(query).await;
     }
 }
 

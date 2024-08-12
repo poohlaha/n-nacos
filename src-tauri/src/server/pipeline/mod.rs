@@ -6,3 +6,4 @@ pub(crate) mod runnable;
 pub(crate) mod index;
 pub(crate) mod languages;
 pub(crate) mod pool;
+pub(crate) mod tag;
