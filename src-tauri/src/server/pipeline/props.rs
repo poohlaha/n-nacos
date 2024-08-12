@@ -8,7 +8,7 @@ use sqlx::FromRow;
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineBasic {
     pub(crate) id: String,
-    pub(crate) pipeline_id: Option<String>, // 流水线ID
+    pub(crate) pipeline_id: String, // 流水线ID
     pub(crate) name: String,                // 名称
     pub(crate) tag: PipelineTag,            // 标签
     pub(crate) path: String,                // 项目路径
@@ -394,6 +394,46 @@ impl PipelineTag {
             PipelineTag::Ios => false,
             PipelineTag::H5 => false,
         };
+    }
+
+    pub fn get(tag: &str) -> PipelineTag {
+        if tag == "None" {
+            return PipelineTag::None;
+        }
+
+        if tag == "Develop" {
+            return PipelineTag::Develop;
+        }
+
+        if tag == "Test" {
+            return PipelineTag::Test;
+        }
+
+        if tag == "CAddAdd" {
+            return PipelineTag::CAddAdd;
+        }
+
+        if tag == "Rust" {
+            return PipelineTag::Rust;
+        }
+
+        if tag == "Java" {
+            return PipelineTag::Java;
+        }
+
+        if tag == "Android" {
+            return PipelineTag::Android;
+        }
+
+        if tag == "Ios" {
+            return PipelineTag::Ios;
+        }
+
+        if tag == "H5" {
+            return PipelineTag::H5;
+        }
+
+        PipelineTag::None
     }
 
     pub fn got(tag: PipelineTag) -> String {

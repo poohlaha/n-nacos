@@ -1,5 +1,6 @@
 //! 流水线
 
+use std::collections::HashMap;
 use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2, TreatBody};
 use crate::database::Database;
@@ -11,10 +12,7 @@ use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{
-    ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag,
-    PipelineVariable,
-};
+use crate::server::pipeline::props::{ExtraVariable, H5ExtraVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable};
 use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::{error, info};
@@ -22,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::{FromRow, MySql, Row};
 use std::path::PathBuf;
+use serde_json::Value;
 use uuid::Uuid;
 
 /// 存储流水线数据库名称
@@ -36,8 +35,11 @@ pub struct Pipeline {
     #[serde(rename = "serverId")]
     pub(crate) server_id: String, // 服务器 ID
     #[serde(rename = "lastRunTime")]
-    pub(crate) last_run_time: Option<String>, // 最后运行时间
+    pub(crate) last_run_time: String, // 最后运行时间
+    pub(crate) tag: PipelineTag,            // 标签
     pub(crate) status: PipelineStatus, // 状态, 同步于 steps
+    pub(crate) duration: String,  // 运行时长, 单位秒
+
     pub(crate) basic: PipelineBasic,   // 基本信息
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcess, // 流程配置
@@ -48,20 +50,37 @@ pub struct Pipeline {
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>, // 修改时间
+    pub(crate) stage_run_index: u32, // stage 运行到哪一步, 从 1 开始计算
 }
 
 impl<'r> FromRow<'r, MySqlRow> for Pipeline {
     fn from_row(row: &MySqlRow) -> Result<Self, sqlx::Error> {
         let status_str: String = row.try_get("status")?;
+        let tag_str: String = row.try_get("tagValue")?;
+        let tag = PipelineTag::get(&tag_str);
+
+        let basic = PipelineBasic {
+            id: row.try_get("basic_id")?,
+            pipeline_id: row.try_get("basic_pipeline_id")?,
+            name: row.try_get("basic_name")?,
+            tag: tag.clone(),
+            path: row.try_get("basic_path")?,
+            description: row.try_get("basic_description")?,
+            create_time: row.try_get("basic_create_time")?,
+            update_time: row.try_get("basic_update_time")?,
+        };
 
         Ok(Pipeline {
             id: row.try_get("id")?,
             server_id: row.try_get("server_id")?,
             last_run_time: row.try_get("last_run_time")?,
+            tag,
             status: PipelineStatus::get(&status_str),
+            duration: row.try_get("duration")?,
+            stage_run_index: row.try_get("stage_run_index")?,
             create_time: row.try_get("create_time")?,
             update_time: row.try_get("update_time")?,
-            basic: Default::default(),
+            basic,
             process_config: Default::default(),
             variables: Vec::new(),
             extra: None,
@@ -82,8 +101,241 @@ impl Treat2<HttpResponse> for Pipeline {
             return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
         }
 
-        let query = sqlx::query_as::<_, Pipeline>("SELECT id, server_id, last_run_time, `status`, create_time, update_time FROM pipeline ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC");
-        return DBHelper::execute_query(query).await;
+        let query = sqlx::query(r#"
+            SELECT
+                p.id as pipeline_id,
+                p.server_id as pipeline_server_id,
+                p.tag_id as pipeline_tag_id,
+                p.last_run_time as pipeline_last_run_time,
+                p.duration as pipeline_duration,
+                p.`status` as pipeline_status,
+                p.create_time as pipeline_create_time,
+                p.update_time as pipeline_update_time,
+                p.stage_run_index as stage_run,
+                CAST(p.stage_run_index AS UNSIGNED) AS stage_run_index,
+                b.id as basic_id,
+                b.pipeline_id as basic_pipeline_id,
+                b.`name` as basic_name,
+                b.path as basic_path,
+                b.description as basic_description,
+                b.create_time as basic_create_time,
+                b.update_time as basic_update_time,
+                t.`value` as tagValue,
+                s.id as process_id,
+                s.pipeline_id as process_pipeline_id,
+                s.create_time as process_create_time,
+                s.update_time as process_update_time,
+                e.id as stage_id,
+                e.process_id as stage_process_id,
+                e.create_time as stage_create_time,
+                e.update_time as stage_update_time,
+                g.id as group_id,
+                g.stage_id as group_stage_id,
+                g.title as group_title,
+                g.create_time as group_create_time,
+                g.update_time as group_update_time,
+                sp.id as step_id,
+                sp.group_id as step_group_id,
+                sp.module as step_module,
+                sp.command as step_command,
+                sp.label as step_label,
+                sp.`status` as step_status,
+                sp.create_time as step_create_time,
+                sp.update_time as step_update_time,
+                v.id as variable_id,
+                v.pipeline_id as variable_pipeline_id,
+                v.`name` as variable_name,
+                v.genre as variable_genre,
+                v.`value` as variable_value,
+                v.disabled as variable_disabled,
+                v.`require` as variable_require,
+                v.description as variable_description,
+                v.create_time as variable_create_time,
+                v.update_time as variable_update_time,
+                c.id as step_component_id,
+                c.step_id as step_component_step_id,
+                c.prop as step_component_prop,
+                c.`value` as step_component_value,
+                c.create_time as step_create_time,
+                c.update_time as step_update_time
+             FROM
+                    pipeline p
+            LEFT JOIN pipeline_variable v on v.pipeline_id = p.id
+            LEFT JOIN pipeline_basic b ON p.id = b.pipeline_id
+            LEFT JOIN pipeline_tag t on t.id = p.tag_id
+            LEFT JOIN pipeline_process s on p.id = s.pipeline_id
+            LEFT JOIN pipeline_stage e on e.process_id = s.id
+            LEFT JOIN pipeline_group g on g.stage_id = e.id
+            LEFT JOIN pipeline_step sp on sp.group_id = g.id
+            LEFT JOIN pipeline_step_component c on c.step_id = sp.id
+            GROUP BY
+                    p.id, p.stage_run_index, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
+            ORDER BY
+            CASE
+                WHEN
+                     p.update_time IS NULL
+                THEN
+                     0
+                ELSE
+                     1
+            END DESC,
+            p.update_time DESC,
+            p.create_time DESC
+        "#);
+
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(get_success_response(Some(Value::Array(Vec::new()))))
+        }
+
+        // 组装数据
+        let mut map: HashMap<String, Pipeline> = HashMap::new();
+        let mut process_map: HashMap<String, PipelineProcess> = HashMap::new();
+        let mut stage_map: HashMap<String, PipelineStage> = HashMap::new();
+        let mut group_map: HashMap<String, PipelineGroup> = HashMap::new();
+        let mut step_map: HashMap<String, PipelineStep> = HashMap::new();
+        let mut step_component_map: HashMap<String, PipelineStepComponent> = HashMap::new();
+
+        for row in rows.iter() {
+            let pipeline_id = row.try_get("pipeline_id").unwrap_or(String::new());
+            let status_str: String = row.try_get("pipeline_status").unwrap_or(String::new());
+            let tag_str: String = row.try_get("tagValue").unwrap_or(String::new());
+            let tag = PipelineTag::get(&tag_str);
+
+            let basic = PipelineBasic {
+                id: row.try_get("basic_id").unwrap_or(String::new()),
+                pipeline_id: row.try_get("basic_pipeline_id").unwrap_or(String::new()),
+                name: row.try_get("basic_name").unwrap_or(String::new()),
+                tag: tag.clone(),
+                path: row.try_get("basic_path").unwrap_or(String::new()),
+                description: row.try_get("basic_description").unwrap_or(String::new()),
+                create_time: row.try_get("basic_create_time").unwrap_or(None),
+                update_time: row.try_get("basic_update_time").unwrap_or(None),
+            };
+
+            // pipeline
+            map.entry(pipeline_id.clone()).or_insert_with(|| Pipeline {
+                id: pipeline_id.to_string(),
+                server_id: row.try_get("pipeline_server_id").unwrap_or(String::new()),
+                last_run_time: row.try_get("last_run_time").unwrap_or(String::new()),
+                tag,
+                status: PipelineStatus::get(&status_str),
+                duration: row.try_get("pipeline_duration").unwrap_or(String::new()),
+                basic,
+                process_config: Default::default(),
+                variables: vec![],
+                extra: None,
+                run: None,
+                create_time: row.try_get("create_time").unwrap_or(None),
+                update_time: row.try_get("update_time").unwrap_or(None),
+                stage_run_index: row.try_get("stage_run_index").unwrap_or(1),
+            });
+
+            // process
+            let process_id = row.try_get("process_id").unwrap_or(String::new());
+            process_map.entry(process_id.clone()).or_insert_with(|| PipelineProcess {
+                id: process_id.to_string(),
+                pipeline_id: row.try_get("process_pipeline_id").unwrap_or(String::new()),
+                stages: vec![],
+                create_time: row.try_get("process_create_time").unwrap_or(None),
+                update_time: row.try_get("process_update_time").unwrap_or(None),
+            });
+
+            // stage
+            let stage_id = row.try_get("stage_id").unwrap_or(String::new());
+            stage_map.entry(stage_id.clone()).or_insert_with(|| PipelineStage {
+                id: stage_id.to_string(),
+                process_id: row.try_get("stage_process_id").unwrap_or(String::new()),
+                groups: vec![],
+                create_time: row.try_get("stage_create_time").unwrap_or(None),
+                update_time: row.try_get("stage_update_time").unwrap_or(None),
+            });
+
+            // group
+            let group_id = row.try_get("group_id").unwrap_or(String::new());
+            group_map.entry(group_id.clone()).or_insert_with(|| PipelineGroup {
+                id: group_id.to_string(),
+                stage_id: row.try_get("group_stage_id").unwrap_or(String::new()),
+                title: row.try_get("group_title").unwrap_or(String::new()),
+                steps: vec![],
+                create_time: row.try_get("group_create_time").unwrap_or(None),
+                update_time: row.try_get("group_update_time").unwrap_or(None),
+            });
+
+            // step
+            let step_id = row.try_get("step_id").unwrap_or(String::new());
+            let step_status_str: String = row.try_get("step_status").unwrap_or(String::new());
+            let step_module_str: String = row.try_get("step_module").unwrap_or(String::new());
+            step_map.entry(step_id.clone()).or_insert_with(|| PipelineStep {
+                id: step_id.to_string(),
+                group_id: row.try_get("step_group_id").unwrap_or(String::new()),
+                module: PipelineCommandStatus::get(&step_module_str),
+                command: row.try_get("step_command").unwrap_or(String::new()),
+                label: row.try_get("step_label").unwrap_or(String::new()),
+                status: PipelineStatus::get(&step_status_str),
+                components: vec![],
+                create_time: row.try_get("group_create_time").unwrap_or(None),
+                update_time: row.try_get("group_update_time").unwrap_or(None),
+            });
+
+            // step component
+            let step_component_id = row.try_get("step_component_id").unwrap_or(String::new());
+            step_component_map.entry(step_component_id.clone()).or_insert_with(|| PipelineStepComponent {
+                id: step_id.to_string(),
+                step_id: row.try_get("step_component_step_id").unwrap_or(String::new()),
+                prop: row.try_get("step_component_prop").unwrap_or(String::new()),
+                value: row.try_get("step_component_value").unwrap_or(String::new()),
+                create_time: row.try_get("group_create_time").unwrap_or(None),
+                update_time: row.try_get("group_update_time").unwrap_or(None),
+            });
+        }
+
+        // step
+        for step_component_id in step_component_map.keys() {
+            let step_component = step_component_map.get(step_component_id);
+            if let Some(step_component) = step_component {
+                let step = step_map.get_mut(&step_component.step_id);
+                if let Some(mut step) = step {
+                    step.components.push(step_component.clone());
+                }
+            }
+        }
+
+        // group
+        for group_id in group_map.keys() {
+            let group = group_map.get(group_id);
+            if let Some(group) = group {
+                let stage = stage_map.get_mut(&group.stage_id);
+                if let Some(mut stage) = stage {
+                    stage.groups.push(group.clone());
+                }
+            }
+        }
+
+        // process
+        for stage_id in stage_map.keys() {
+            let stage = stage_map.get(stage_id);
+            if let Some(stage) = stage {
+                let process = process_map.get_mut(&stage.process_id);
+                if let Some(mut process) = process {
+                    process.stages.push(stage.clone());
+                }
+            }
+        }
+
+        // pipeline
+        for process_id in process_map.keys() {
+            let process = process_map.get(process_id);
+            if let Some(process) = process {
+                let pipe = map.get_mut(&process.pipeline_id);
+                if let Some(mut pipe) = pipe {
+                    pipe.process_config = process.clone()
+                }
+            }
+        }
+
+        let list: Vec<Pipeline> = map.into_values().collect();
+        get_success_response_by_value(list)
 
         /*
         // 解析成 list, 添加其他属性
@@ -155,14 +407,17 @@ impl Treat2<HttpResponse> for Pipeline {
         // 插入 pipeline 表
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            INSERT INTO pipeline (id, server_id, last_run_time, status, create_time, update_time)
+            INSERT INTO pipeline (id, server_id, tag_id, last_run_time, duration, status, stage_run_index, create_time, update_time)
             VALUES (?, ?, ?, ?, ?, ?)
         "#,
         )
         .bind(&pipeline_clone.id)
         .bind(&pipeline_clone.server_id)
+        .bind(tag.id.clone())
+        .bind("")
         .bind("")
         .bind(PipelineStatus::got(PipelineStatus::No))
+        .bind(1)
         .bind(&create_time)
         .bind(&pipeline_clone.update_time);
         query_list.push(pipeline_query);

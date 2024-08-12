@@ -1,16 +1,9 @@
 //! 数据库接口
 
-use crate::error::Error;
-use crate::prepare::{get_error_response, get_success_response, HttpResponse, HttpResponseData};
-use crate::DATABASE_POOLS;
+use crate::prepare::{HttpResponseData};
 use async_trait::async_trait;
-use log::error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::Value;
-use sqlx::mysql::{MySqlArguments, MySqlRow};
-use sqlx::query::{Query, QueryAs};
-use sqlx::{FromRow, MySql};
 
 pub trait TreatBody: Serialize + DeserializeOwned + 'static {}
 

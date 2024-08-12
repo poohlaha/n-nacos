@@ -29,6 +29,17 @@ impl DBHelper {
         };
     }
 
+    /// 执行 sql, 返回 mySqlRow
+    pub(crate) async fn execute_rows<'a>(query: Query<'a, MySql, MySqlArguments>) -> Result<Vec<MySqlRow>, String> {
+        let pool = Self::get_pools();
+
+        return query.fetch_all(&pool).await.map_err(|err| {
+            let msg = format!("execute rows error: {:#?}", err);
+            error!("{}", msg);
+            Error::Error(msg).to_string()
+        });
+    }
+
     pub(crate) fn get_pools() -> sqlx::Pool<MySql> {
         return {
             let pools = DATABASE_POOLS.lock().unwrap();
