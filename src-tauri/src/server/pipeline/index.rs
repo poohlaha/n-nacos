@@ -41,7 +41,7 @@ pub struct Pipeline {
     pub(crate) last_run_time: Option<String>, // 最后运行时间
     pub(crate) tag: Option<PipelineTag>,       // 标签
     pub(crate) status: Option<PipelineStatus>, // 状态, 同步于 steps
-    pub(crate) duration: String,       // 运行时长, 单位秒
+    pub(crate) duration: String,               // 运行时长, 单位秒
 
     pub(crate) basic: PipelineBasic, // 基本信息
     #[serde(rename = "processConfig")]
@@ -529,6 +529,8 @@ impl Pipeline {
                 s.update_time as process_update_time,
                 e.id as stage_id,
                 e.process_id as stage_process_id,
+                e.history_id as stage_history_id,
+		        CAST(e.order AS UNSIGNED) as stage_order,
                 e.create_time as stage_create_time,
                 e.update_time as stage_update_time,
                 g.id as group_id,
@@ -693,8 +695,8 @@ impl Pipeline {
             stage_map.entry(stage_id.clone()).or_insert_with(|| PipelineStage {
                 id: stage_id.to_string(),
                 process_id: row.try_get("stage_process_id").unwrap_or(String::new()),
-                history_id: row.try_get("history_id").unwrap_or(String::new()),
-                order: 0,
+                history_id: row.try_get("stage_history_id").unwrap_or(String::new()),
+                order: row.try_get("stage_order").unwrap_or(0),
                 groups: vec![],
                 create_time: row.try_get("stage_create_time").unwrap_or(None),
                 update_time: row.try_get("stage_update_time").unwrap_or(None),
@@ -739,13 +741,24 @@ impl Pipeline {
             });
         }
 
-        // step
+        // step component
         for step_component_id in step_component_map.keys() {
             let step_component = step_component_map.get(step_component_id);
             if let Some(step_component) = step_component {
                 let step = step_map.get_mut(&step_component.step_id);
                 if let Some(mut step) = step {
                     step.components.push(step_component.clone());
+                }
+            }
+        }
+
+        // step
+        for step_id in step_map.keys() {
+            let step = step_map.get(step_id);
+            if let Some(step) = step {
+                let group = group_map.get_mut(&step.group_id);
+                if let Some(mut group) = group {
+                    group.steps.push(step.clone());
                 }
             }
         }

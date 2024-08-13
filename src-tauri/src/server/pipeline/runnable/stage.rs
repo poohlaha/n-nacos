@@ -10,7 +10,7 @@ use crate::prepare::{convert_res, get_error_response, get_success_response_by_va
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineHistoryVariable, PipelineRunnableStageStep, PipelineRunSnapshot, PipelineRunStage, PipelineRuntime, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineHistoryVariable, PipelineRunSnapshot, PipelineRunStage, PipelineRunnableStageStep, PipelineRuntime, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
 use sftp::config::Upload;
@@ -666,7 +666,7 @@ impl PipelineRunnableStage {
         }
 
         // let need_increment_str: String = Self::get_value_from_variables(&props.variables, "needIncrement");
-       let need_increment_str: String = String::from("No");
+        let need_increment_str: String = String::from("No");
         let need_increment = if need_increment_str.as_str().to_lowercase() == "yes" { true } else { false };
 
         let server = se.unwrap();
