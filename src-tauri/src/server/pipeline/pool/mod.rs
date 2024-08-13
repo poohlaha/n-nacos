@@ -4,7 +4,7 @@ use crate::database::Database;
 use crate::error::Error;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{PipelineCurrentRunStage, PipelineStageTask, PipelineStatus};
+use crate::server::pipeline::props::{PipelineRunStage, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
@@ -94,14 +94,14 @@ impl Pool {
         let status = PipelineStatus::Process;
         let props = &stage.props;
         let mut props_stage = props.stage.clone();
-        props_stage.status = Some(status.clone());
+        // props_stage.status = Some(status.clone());
 
         let start_time = Utils::get_date(None);
-        let res = PipelineRunnable::update_current_pipeline(&pipeline, props, true, Some(status.clone()), Some(start_time), None, None, Some(props_stage), None, false);
+        let res = PipelineRunnable::update_current_pipeline(&pipeline, props, true, Some(status.clone()), Some(start_time), None, None, props_stage, None, false);
 
-        let mut error_stage = PipelineCurrentRunStage::default();
-        error_stage.index = 1;
-        error_stage.status = Some(PipelineStatus::Failed);
+        let mut error_stage = PipelineRunStage::default();
+        error_stage.stage_index = 1;
+        // error_stage.status = Some(PipelineStatus::Failed);
 
         if let Some(res) = res.clone().ok() {
             let pipe: Result<Pipeline, String> = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string());

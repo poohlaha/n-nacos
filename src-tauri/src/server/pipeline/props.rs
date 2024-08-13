@@ -1,6 +1,5 @@
 //! 流水线属性
 
-use crate::server::pipeline::index::Pipeline;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -43,6 +42,8 @@ pub struct PipelineStage {
     pub(crate) id: String,
     #[serde(rename = "processId")]
     pub(crate) process_id: String,
+    #[serde(rename = "historyId")]
+    pub(crate) history_id: String, // 历史表ID
     pub(crate) groups: Vec<PipelineGroup>,
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
@@ -183,16 +184,10 @@ pub struct PipelineVariable {
     pub(crate) require: String,  // 是否必填
     #[serde(rename = "desc")]
     pub(crate) description: String, // 描述
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>,
-}
-
-/// 启动变量选中
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineSelectedVariable {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) value: String,
 }
 
 impl PipelineVariable {
@@ -311,54 +306,85 @@ pub struct PipelineRunVariable {
     pub(crate) project_name: String, // 名称
     pub(crate) branch: String, // 分支
     #[serde(rename = "historyList")]
-    pub(crate) history_list: Vec<Pipeline>, // 运行历史
-    pub(crate) current: PipelineCurrentRun, // 当前流水线状态
+    pub(crate) history_list: Vec<PipelineRuntime>, // 运行历史
+    pub(crate) current: PipelineRuntime, // 当前流水线状态
 }
 
 /// 当前运行流水线
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineCurrentRun {
-    pub(crate) order: u32,                     // 顺序
-    pub(crate) stage: PipelineCurrentRunStage, // stage 运行到哪一步
-    pub(crate) stages: Vec<PipelineStage>,     // 构建过程
+pub struct PipelineRuntime {
+    pub(crate) id: String,
+    #[serde(rename = "pipelineId")]
+    pub(crate) pipeline_id: String,
+    pub(crate) order: u32,                      // 顺序
+    pub(crate) stage: Option<PipelineRunStage>, // stage 运行到哪一步
+    pub(crate) stages: Vec<PipelineStage>,      // 构建过程
+    pub(crate) status: PipelineStatus,          // 运行状态
     #[serde(rename = "startTime")]
     pub(crate) start_time: String, // 开始时间
-    pub(crate) duration: u32,                  // 运行时长, 单位秒
-    pub(crate) runnable: PipelineRunProps,     // 运行时快照
-    pub(crate) log: String,                    // 日志, 根据 {server_id/id/order}.log 来读取
+    pub(crate) duration: String,                // 运行时长, 单位秒
+    pub(crate) tag: PipelineTag,                // 标签
+    pub(crate) snapshot: Option<PipelineRunSnapshot>, // 运行时快照
+    pub(crate) log: String,                     // 日志, 根据 {server_id/id/order}.log 来读取
+    #[serde(rename = "createTime")]
+    pub(crate) create_time: Option<String>, // 创建时间
+    #[serde(rename = "updateTime")]
+    pub(crate) update_time: Option<String>, // 修改时间
 }
 
 /// 当前流水线步骤
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineCurrentRunStage {
-    pub(crate) index: u32, // stage 运行到哪一步, 从 1 开始计算
+pub struct PipelineRunStage {
+    pub(crate) id: String,
+    #[serde(rename = "historyId")]
+    pub(crate) history_id: String,
+    #[serde(rename = "stageIndex")]
+    pub(crate) stage_index: u32, // stage 运行到哪一步, 从 1 开始计算
     #[serde(rename = "groupIndex")]
     pub(crate) group_index: u32, // group 运行到哪一步, 从 0 开始计算
     #[serde(rename = "stepIndex")]
     pub(crate) step_index: u32, // step 运行到哪一步, 从 0 开始计算
-    #[serde(rename = "finishGroupCount")]
-    pub(crate) finish_group_count: u32, // stage 中运行完成 group 个数
     pub(crate) finished: bool, // 是否完成
-    pub(crate) status: Option<PipelineStatus>, // 运行状态
+    #[serde(rename = "createTime")]
+    pub(crate) create_time: Option<String>, // 创建时间
+    #[serde(rename = "updateTime")]
+    pub(crate) update_time: Option<String>, // 修改时间
 }
 
 /// 流水线运行时的属性
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineRunProps {
+pub struct PipelineRunSnapshot {
     pub(crate) id: String, // 流水线ID,
-    #[serde(rename = "serverId")]
-    pub(crate) server_id: String, // 服务器ID,
-    pub(crate) stage: PipelineCurrentRunStage, // stage
+    #[serde(rename = "historyId")]
+    pub(crate) history_id: String, // 历史记录 ID,
+    // pub(crate) stage: PipelineCurrentRunStage, // stage
     pub(crate) tag: PipelineTag, // 流水线 Tag
-    pub(crate) node: Option<String>, // nodeJs 版本号
-    pub(crate) branch: String, // 分支
-    pub(crate) make: Option<String>, // Make命令
-    pub(crate) command: Option<String>, // 本机安装的命令
-    pub(crate) script: Option<String>, // package.json 中的 scripts 命令
-    pub(crate) variables: Vec<PipelineVariable>, // 启动变量
-    #[serde(rename = "selectedVariables")]
-    pub(crate) selected_variables: Vec<PipelineSelectedVariable>, // 启动变量选中的值
-    pub(crate) remark: String, // 备注
+    pub(crate) node: String,     // nodeJs 版本号
+    pub(crate) branch: String,   // 分支
+    pub(crate) make: String,     // Make 命令
+    pub(crate) command: String,  // 本机安装的命令
+    pub(crate) script: String,   // package.json 中的 scripts 命令
+    #[serde(rename = "variables")]
+    pub(crate) variables: Vec<PipelineHistoryVariable>, // 启动变量选中的值
+    pub(crate) remark: String,   // 备注
+    #[serde(rename = "createTime")]
+    pub(crate) create_time: Option<String>, // 创建时间
+    #[serde(rename = "updateTime")]
+    pub(crate) update_time: Option<String>, // 修改时间
+}
+
+/// 启动变量历史
+#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PipelineHistoryVariable {
+    pub(crate) id: String,
+    #[serde(rename = "snapshotId")]
+    pub(crate) snapshot_id: String, // 快照 ID,
+    pub(crate) name: String,
+    pub(crate) value: String,
+    #[serde(rename = "createTime")]
+    pub(crate) create_time: Option<String>,
+    #[serde(rename = "updateTime")]
+    pub(crate) update_time: Option<String>,
 }
 
 /// 流水线标签
@@ -465,7 +491,7 @@ pub struct PipelineStageTask {
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
     pub(crate) stages: Vec<PipelineStage>,
-    pub(crate) props: PipelineRunProps,
+    pub(crate) props: PipelineRuntime,
     pub(crate) order: u32,
 }
 

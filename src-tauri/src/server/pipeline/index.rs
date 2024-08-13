@@ -12,8 +12,8 @@ use crate::prepare::{get_error_response, get_success_response, get_success_respo
 use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{
-    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent,
-    PipelineTag, PipelineVariable, RunnableVariable,
+    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable,
+    RunnableVariable,
 };
 use async_trait::async_trait;
 use handlers::utils::Utils;
@@ -47,14 +47,14 @@ pub struct Pipeline {
     #[serde(rename = "processConfig")]
     pub(crate) process_config: PipelineProcess, // 流程配置
     pub(crate) variables: Vec<PipelineVariable>, // 变量
-    #[serde(rename = "runnableInfo")]
-    pub(crate) runnable_info: Option<RunnableVariable>, // 运行时的信息
-    pub(crate) run: Option<PipelineRunVariable>, // 运行信息
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>, // 修改时间
-    pub(crate) stage_run_index: u32, // stage 运行到哪一步, 从 1 开始计算
+
+    #[serde(rename = "runnableInfo")]
+    pub(crate) runnable_info: Option<RunnableVariable>, // 运行时的信息
+    pub(crate) runtime: Option<PipelineRuntime>, // 运行信息
 }
 
 impl<'r> FromRow<'r, MySqlRow> for Pipeline {
@@ -81,14 +81,13 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
             tag,
             status: PipelineStatus::get(&status_str),
             duration: row.try_get("duration")?,
-            stage_run_index: row.try_get("stage_run_index")?,
             create_time: row.try_get("create_time")?,
             update_time: row.try_get("update_time")?,
             basic,
             process_config: Default::default(),
             variables: Vec::new(),
             runnable_info: None,
-            run: None,
+            runtime: None,
         })
     }
 }
@@ -462,10 +461,8 @@ impl Treat2<HttpResponse> for Pipeline {
         }
 
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let query = sqlx::query_as::<_, Server>("select * from pipeline where id = ? and server_id = ?").bind(&pipeline.id).bind(&pipeline.server_id);
-        let mut response = DBHelper::execute_query(query).await?;
+        let response = Self::get_query_list(pipeline, None).await?;
         if response.code != 200 {
-            response.error = String::from("根据 ID 查找流水线失败");
             return Ok(response);
         }
 
@@ -577,12 +574,18 @@ impl Pipeline {
         "#,
         );
 
+        // 添加 server_id
+        sql.push_str(&format!(" WHERE p.server_id = '{}' ", pipeline.server_id));
+
+        if !pipeline.id.is_empty() {
+            sql.push_str(&format!(" AND b.id = '{}'", pipeline.id))
+        }
+
         if query_form.is_some() {
             let form = query_form.unwrap();
             let name = &form.name;
             let status = &form.status;
 
-            sql.push_str(" WHERE 1 = 1 ");
             if !name.is_empty() {
                 sql.push_str(&format!(" AND b.`name` like '%{}%'", name))
             }
@@ -656,10 +659,9 @@ impl Pipeline {
                 process_config: Default::default(),
                 variables: vec![],
                 runnable_info: None,
-                run: None,
+                runtime: None,
                 create_time: row.try_get("create_time").unwrap_or(None),
                 update_time: row.try_get("update_time").unwrap_or(None),
-                stage_run_index: row.try_get("stage_run_index").unwrap_or(1),
             });
 
             // variables
@@ -692,6 +694,7 @@ impl Pipeline {
             stage_map.entry(stage_id.clone()).or_insert_with(|| PipelineStage {
                 id: stage_id.to_string(),
                 process_id: row.try_get("stage_process_id").unwrap_or(String::new()),
+                history_id: row.try_get("history_id").unwrap_or(String::new()),
                 groups: vec![],
                 create_time: row.try_get("stage_create_time").unwrap_or(None),
                 update_time: row.try_get("stage_update_time").unwrap_or(None),

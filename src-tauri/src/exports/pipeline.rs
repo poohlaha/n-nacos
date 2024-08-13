@@ -3,12 +3,12 @@
 use crate::database::interface::{Treat, Treat2};
 use crate::prepare::HttpResponse;
 use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::PipelineRunProps;
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::task::Task;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use crate::server::pipeline::props::PipelineRuntime;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct QueryForm {
@@ -82,13 +82,13 @@ pub async fn get_pipeline_detail(id: String, server_id: String) -> Result<HttpRe
 
 /// 运行流水线
 #[tauri::command]
-pub async fn pipeline_run(props: PipelineRunProps) -> Result<HttpResponse, String> {
-    Task::task_param_future::<PipelineRunProps, _, _>(props.clone(), |pipe| async move { PipelineRunnable::exec(&*pipe).await }).await
+pub async fn pipeline_run(props: PipelineRuntime) -> Result<HttpResponse, String> {
+    Task::task_param_future::<PipelineRuntime, _, _>(props.clone(), |pipe| async move { PipelineRunnable::exec(&*pipe).await }).await
 }
 
 /// 批量运行流水线
 #[tauri::command]
-pub async fn pipeline_batch_run(list: Vec<PipelineRunProps>) -> Result<HttpResponse, String> {
+pub async fn pipeline_batch_run(list: Vec<PipelineRuntime>) -> Result<HttpResponse, String> {
     Task::task_batch_param(list, |l| async move { PipelineRunnable::batch_exec(&*l).await }).await
 }
 
