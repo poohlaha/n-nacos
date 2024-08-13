@@ -7,7 +7,8 @@ use sqlx::FromRow;
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineBasic {
     pub(crate) id: String,
-    pub(crate) pipeline_id: String, // 流水线ID
+    #[serde(rename = "pipelineId")]
+    pub(crate) pipeline_id: Option<String>, // 流水线ID
     pub(crate) name: String,        // 名称
     pub(crate) tag: PipelineTag,    // 标签
     pub(crate) path: String,        // 项目路径
@@ -44,6 +45,7 @@ pub struct PipelineStage {
     pub(crate) process_id: String,
     #[serde(rename = "historyId")]
     pub(crate) history_id: String, // 历史表ID
+    pub(crate) order: u32, // 顺序
     pub(crate) groups: Vec<PipelineGroup>,
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
@@ -176,7 +178,8 @@ impl PipelineProcess {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineVariable {
     pub(crate) id: String,
-    pub(crate) pipeline_id: String,
+    #[serde(rename = "pipelineId")]
+    pub(crate) pipeline_id: Option<String>,
     pub(crate) name: String,     // 变量名
     pub(crate) genre: String,    // 变量类型
     pub(crate) value: String,    // 值

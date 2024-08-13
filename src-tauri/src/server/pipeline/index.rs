@@ -38,9 +38,9 @@ pub struct Pipeline {
     #[serde(rename = "serverId")]
     pub(crate) server_id: String, // 服务器 ID
     #[serde(rename = "lastRunTime")]
-    pub(crate) last_run_time: String, // 最后运行时间
-    pub(crate) tag: PipelineTag,       // 标签
-    pub(crate) status: PipelineStatus, // 状态, 同步于 steps
+    pub(crate) last_run_time: Option<String>, // 最后运行时间
+    pub(crate) tag: Option<PipelineTag>,       // 标签
+    pub(crate) status: Option<PipelineStatus>, // 状态, 同步于 steps
     pub(crate) duration: String,       // 运行时长, 单位秒
 
     pub(crate) basic: PipelineBasic, // 基本信息
@@ -61,13 +61,13 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
     fn from_row(row: &MySqlRow) -> Result<Self, sqlx::Error> {
         let status_str: String = row.try_get("status")?;
         let tag_str: String = row.try_get("tagValue")?;
-        let tag = PipelineTag::get(&tag_str);
+        let tag = Some(PipelineTag::get(&tag_str));
 
         let basic = PipelineBasic {
             id: row.try_get("basic_id")?,
             pipeline_id: row.try_get("basic_pipeline_id")?,
             name: row.try_get("basic_name")?,
-            tag: tag.clone(),
+            tag: tag.clone().unwrap().clone(),
             path: row.try_get("basic_path")?,
             description: row.try_get("basic_description")?,
             create_time: row.try_get("basic_create_time")?,
@@ -79,7 +79,7 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
             server_id: row.try_get("server_id")?,
             last_run_time: row.try_get("last_run_time")?,
             tag,
-            status: PipelineStatus::get(&status_str),
+            status: Some(PipelineStatus::get(&status_str)),
             duration: row.try_get("duration")?,
             create_time: row.try_get("create_time")?,
             update_time: row.try_get("update_time")?,
@@ -144,8 +144,8 @@ impl Treat2<HttpResponse> for Pipeline {
         // 插入 pipeline 表
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            INSERT INTO pipeline (id, server_id, tag_id, last_run_time, duration, status, stage_run_index, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO pipeline (id, server_id, tag_id, last_run_time, duration, status, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         )
         .bind(&pipeline_clone.id)
@@ -154,7 +154,6 @@ impl Treat2<HttpResponse> for Pipeline {
         .bind("")
         .bind("")
         .bind(PipelineStatus::got(PipelineStatus::No))
-        .bind(1)
         .bind(&create_time)
         .bind(&pipeline_clone.update_time);
         query_list.push(pipeline_query);
@@ -272,16 +271,18 @@ impl Treat2<HttpResponse> for Pipeline {
         // 2. 流水线阶段, 插入 pipeline_stage 表
         let stages = &process_config.stages;
         if !stages.is_empty() {
-            for stage in stages.iter() {
+            for (usize, stage) in stages.iter().enumerate() {
                 let stage_id = Uuid::new_v4().to_string();
                 let stage_query = sqlx::query::<MySql>(
                     r#"
-            INSERT INTO pipeline_stage (id, process_id, create_time, update_time)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO pipeline_stage (id, process_id, history_id, `order`, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(stage_id.clone())
                 .bind(process_id.clone())
+                .bind("")
+                .bind(format!("{}", usize as u32 + 1))
                 .bind(&create_time)
                 .bind(&process_config.update_time);
                 query_list.push(stage_query);
@@ -514,8 +515,6 @@ impl Pipeline {
                 p.`status` as pipeline_status,
                 p.create_time as pipeline_create_time,
                 p.update_time as pipeline_update_time,
-                p.stage_run_index as stage_run,
-                CAST(p.stage_run_index AS UNSIGNED) AS stage_run_index,
                 b.id as basic_id,
                 b.pipeline_id as basic_pipeline_id,
                 b.`name` as basic_name,
@@ -599,7 +598,7 @@ impl Pipeline {
         sql.push_str(
             r#"
             GROUP BY
-                    p.id, p.stage_run_index, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
+                    p.id, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
             ORDER BY
             CASE
                 WHEN
@@ -634,13 +633,13 @@ impl Pipeline {
             let pipeline_id = row.try_get("pipeline_id").unwrap_or(String::new());
             let status_str: String = row.try_get("pipeline_status").unwrap_or(String::new());
             let tag_str: String = row.try_get("tagValue").unwrap_or(String::new());
-            let tag = PipelineTag::get(&tag_str);
+            let tag = Some(PipelineTag::get(&tag_str));
 
             let basic = PipelineBasic {
                 id: row.try_get("basic_id").unwrap_or(String::new()),
-                pipeline_id: row.try_get("basic_pipeline_id").unwrap_or(String::new()),
+                pipeline_id: row.try_get("basic_pipeline_id").unwrap_or(None),
                 name: row.try_get("basic_name").unwrap_or(String::new()),
-                tag: tag.clone(),
+                tag: tag.clone().unwrap(),
                 path: row.try_get("basic_path").unwrap_or(String::new()),
                 description: row.try_get("basic_description").unwrap_or(String::new()),
                 create_time: row.try_get("basic_create_time").unwrap_or(None),
@@ -651,9 +650,9 @@ impl Pipeline {
             map.entry(pipeline_id.clone()).or_insert_with(|| Pipeline {
                 id: pipeline_id.to_string(),
                 server_id: row.try_get("pipeline_server_id").unwrap_or(String::new()),
-                last_run_time: row.try_get("last_run_time").unwrap_or(String::new()),
+                last_run_time: row.try_get("last_run_time").unwrap_or(None),
                 tag,
-                status: PipelineStatus::get(&status_str),
+                status: Some(PipelineStatus::get(&status_str)),
                 duration: row.try_get("pipeline_duration").unwrap_or(String::new()),
                 basic,
                 process_config: Default::default(),
@@ -668,7 +667,7 @@ impl Pipeline {
             let variable_id = row.try_get("variable_id").unwrap_or(String::new());
             variable_map.entry(variable_id.clone()).or_insert_with(|| PipelineVariable {
                 id: pipeline_id.to_string(),
-                pipeline_id: row.try_get("pipeline_id").unwrap_or(String::new()),
+                pipeline_id: row.try_get("pipeline_id").unwrap_or(None),
                 name: row.try_get("variable_name").unwrap_or(String::new()),
                 genre: row.try_get("variable_genre").unwrap_or(String::new()),
                 value: row.try_get("variable_value").unwrap_or(String::new()),
@@ -695,6 +694,7 @@ impl Pipeline {
                 id: stage_id.to_string(),
                 process_id: row.try_get("stage_process_id").unwrap_or(String::new()),
                 history_id: row.try_get("history_id").unwrap_or(String::new()),
+                order: 0,
                 groups: vec![],
                 create_time: row.try_get("stage_create_time").unwrap_or(None),
                 update_time: row.try_get("stage_update_time").unwrap_or(None),
@@ -787,7 +787,7 @@ impl Pipeline {
         for variable_id in variable_map.keys() {
             let variable = variable_map.get(variable_id);
             if let Some(variable) = variable {
-                let pipe = map.get_mut(&variable.pipeline_id);
+                let pipe = map.get_mut(&variable.pipeline_id.clone().unwrap_or(String::new()));
                 if let Some(mut pipe) = pipe {
                     pipe.variables.push(variable.clone())
                 }
@@ -807,37 +807,6 @@ impl Pipeline {
         }
 
         get_success_response_by_value(list)
-    }
-
-    fn find_pipeline_by_form(form: &QueryForm, pipeline: &Pipeline) -> Option<Pipeline> {
-        let basic = &pipeline.basic;
-
-        // name 不为空, status 为空
-        if !form.name.is_empty() && form.status.is_empty() {
-            if basic.name.to_lowercase().contains(&form.name.to_lowercase()) {
-                return Some(pipeline.clone());
-            }
-        }
-
-        // name 为空, status 不为空
-        if form.name.is_empty() && !form.status.is_empty() {
-            // 获取 status
-            let status = PipelineStatus::got(pipeline.status.clone());
-            if status == form.status {
-                return Some(pipeline.clone());
-            }
-        }
-
-        // name 不为空, status 不为空
-        if !form.name.is_empty() && !form.status.is_empty() {
-            // 获取 status
-            let status = PipelineStatus::got(pipeline.status.clone());
-            if status == form.status && basic.name.to_lowercase().contains(&form.name.to_lowercase()) {
-                return Some(pipeline.clone());
-            }
-        }
-
-        None
     }
 
     /// 流水线存储名字: PIPELINE_NAME_流水线ID
