@@ -11,7 +11,10 @@ use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable};
+use crate::server::pipeline::props::{
+    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineCurrentRun, PipelineCurrentRunStage, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent,
+    PipelineTag, PipelineVariable, RunnableVariable,
+};
 use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::{error, info};
@@ -97,8 +100,7 @@ impl Treat2<HttpResponse> for Pipeline {
     type B = Pipeline;
 
     /// 列表
-    async fn get_list(_: &Self::B) -> Result<HttpResponse, String>
-    {
+    async fn get_list(_: &Self::B) -> Result<HttpResponse, String> {
         Ok(get_success_response(Some(Value::Bool(true))))
     }
 
@@ -504,7 +506,8 @@ impl Pipeline {
             return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
         }
 
-        let mut sql = String::from(r#"
+        let mut sql = String::from(
+            r#"
             SELECT
                 p.id as pipeline_id,
                 p.server_id as pipeline_server_id,
@@ -571,7 +574,8 @@ impl Pipeline {
             LEFT JOIN pipeline_group g on g.stage_id = e.id
             LEFT JOIN pipeline_step sp on sp.group_id = g.id
             LEFT JOIN pipeline_step_component c on c.step_id = sp.id
-        "#);
+        "#,
+        );
 
         if query_form.is_some() {
             let form = query_form.unwrap();
@@ -589,7 +593,8 @@ impl Pipeline {
         }
 
         // group by and order by
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
             GROUP BY
                     p.id, p.stage_run_index, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
             ORDER BY
@@ -603,7 +608,8 @@ impl Pipeline {
             END DESC,
             p.update_time DESC,
             p.create_time DESC
-        "#);
+        "#,
+        );
 
         let query = sqlx::query(&sql);
 

@@ -24,10 +24,7 @@ pub struct Form {
 
 impl Into<QueryForm> for Form {
     fn into(self) -> QueryForm {
-        QueryForm {
-            name: self.name,
-            status: self.status,
-        }
+        QueryForm { name: self.name, status: self.status }
     }
 }
 
@@ -47,7 +44,8 @@ pub async fn get_pipeline_list(server_id: String, form: QueryForm) -> Result<Htt
     Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move {
         let form_cloned = &*form_cloned.clone();
         Pipeline::get_query_list(&*pipe, Some(form_cloned.clone())).await
-    }).await
+    })
+    .await
 }
 
 /// 插入流水线
