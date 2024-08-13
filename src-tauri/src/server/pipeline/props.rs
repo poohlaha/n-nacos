@@ -175,7 +175,7 @@ impl PipelineProcess {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PipelineVariable {
     pub(crate) id: String,
-    pub(crate) pipeline_id: Option<String>,
+    pub(crate) pipeline_id: String,
     pub(crate) name: String,     // 变量名
     pub(crate) genre: String,    // 变量类型
     pub(crate) value: String,    // 值
@@ -203,16 +203,16 @@ impl PipelineVariable {
 
 /// 附加的变量
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ExtraVariable {
+pub struct RunnableVariable {
     pub(crate) branches: Vec<String>,
-    pub(crate) h5: Option<H5ExtraVariable>,
+    pub(crate) h5: Option<H5RunnableVariable>,
     #[serde(rename = "isRemoteUrl")]
     pub(crate) is_remote_url: bool,
 }
 
 /// 附加的 H5 变量
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct H5ExtraVariable {
+pub struct H5RunnableVariable {
     #[serde(rename = "displayFields")]
     pub(crate) display_fields: Vec<DisplayField>,
     pub(crate) selected: Option<H5ExtraSelectedVariable>,
@@ -225,7 +225,7 @@ pub struct H5ExtraVariable {
     pub(crate) package_commands: Vec<String>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayField {
     pub(crate) label: String,
     pub(crate) value: String,
@@ -236,7 +236,7 @@ pub struct DisplayField {
 }
 
 /// 附加的选中的 H5 变量
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct H5ExtraSelectedVariable {
     #[serde(rename = "makeCommand")]
     pub(crate) make_command: Option<String>,

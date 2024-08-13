@@ -2,7 +2,7 @@
 
 use crate::helper::git::GitHandler;
 use crate::helper::index::Helper;
-use crate::server::pipeline::props::{DisplayField, H5ExtraVariable};
+use crate::server::pipeline::props::{DisplayField, H5RunnableVariable};
 use handlers::file::FileHandler;
 use log::info;
 use regex::Regex;
@@ -15,11 +15,11 @@ pub(crate) const H5_INSTALLED_CMDS: [&str; 4] = ["npm", "yarn", "pnpm", "cnpm"];
 
 impl H5FileHandler {
     /// 获取默认的文件命令
-    pub fn get_default_file_commands(url: &str) -> Option<H5ExtraVariable> {
+    pub fn get_default_file_commands(url: &str) -> Option<H5RunnableVariable> {
         // display fields
         if GitHandler::is_remote_url(url) {
             info!("get default file commands failed, `{}` is a remote url!", url);
-            return Some(H5ExtraVariable {
+            return Some(H5RunnableVariable {
                 display_fields: Self::get_display_fields(&Vec::new(), &Vec::new()),
                 ..Default::default()
             });
@@ -38,7 +38,7 @@ impl H5FileHandler {
         let package_commands = Self::get_package_commands(url);
 
         let display_fields = Self::get_display_fields(&make_commands, &package_commands);
-        return Some(H5ExtraVariable {
+        return Some(H5RunnableVariable {
             display_fields,
             selected: None,
             node: String::new(),

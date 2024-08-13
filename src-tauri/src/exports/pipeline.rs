@@ -16,6 +16,21 @@ pub struct QueryForm {
     pub(crate) status: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct Form {
+    pub name: String,
+    pub status: String,
+}
+
+impl Into<QueryForm> for Form {
+    fn into(self) -> QueryForm {
+        QueryForm {
+            name: self.name,
+            status: self.status,
+        }
+    }
+}
+
 impl QueryForm {
     pub fn is_empty(form: &QueryForm) -> bool {
         return form.name.is_empty() && form.status.is_empty();
@@ -29,7 +44,10 @@ pub async fn get_pipeline_list(server_id: String, form: QueryForm) -> Result<Htt
     pipeline.server_id = server_id.to_string();
 
     let form_cloned = Arc::new(form.clone());
-    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { Pipeline::get_query_list(&*pipe, &*form_cloned).await }).await
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move {
+        let form_cloned = &*form_cloned.clone();
+        Pipeline::get_query_list(&*pipe, Some(form_cloned.clone())).await
+    }).await
 }
 
 /// 插入流水线

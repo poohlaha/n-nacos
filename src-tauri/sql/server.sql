@@ -116,7 +116,6 @@ CREATE TABLE `pipeline_step_component` (
   `update_time` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- ----------------------------
 -- Table structure for pipeline_tag
 -- ----------------------------
@@ -125,6 +124,7 @@ CREATE TABLE `pipeline_tag` (
   `id` varchar(255) NOT NULL,
   `name` varchar(255) DEFAULT NULL,
   `value` varchar(255) DEFAULT NULL,
+  `color` varchar(255) DEFAULT NULL,
   `create_time` varchar(255) DEFAULT NULL,
   `update_time` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
@@ -134,14 +134,14 @@ CREATE TABLE `pipeline_tag` (
 -- Records of pipeline_tag
 -- ----------------------------
 BEGIN;
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('1', '开发', 'develop', '2024-08-07 10:40:19', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('2', '测试', 'test', '2024-08-07 10:40:20', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('3', 'C++', 'C++', '2024-08-07 10:40:21', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('4', 'Rust', 'Rust', '2024-08-07 10:40:22', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('5', 'Java', 'Java', '2024-08-07 10:40:23', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('6', 'Android', 'Android', '2024-08-07 10:40:24', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('7', 'Ios', 'Ios', '2024-08-07 10:40:25', NULL);
-INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `create_time`, `update_time`) VALUES ('8', 'H5', 'H5', '2024-08-07 10:40:26', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('1', '开发', 'develop', 'processing', '2024-08-07 10:40:19', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('2', '测试', 'test', 'orange', '2024-08-07 10:40:20', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('3', 'C++', 'C++', 'lime', '2024-08-07 10:40:21', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('4', 'Rust', 'Rust', 'gold', '2024-08-07 10:40:22', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('5', 'Java', 'Java', 'purple', '2024-08-07 10:40:23', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('6', 'Android', 'Android', 'volcano', '2024-08-07 10:40:24', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('7', 'Ios', 'Ios', 'cyan', '2024-08-07 10:40:25', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('8', 'H5', 'H5', 'success', '2024-08-07 10:40:26', NULL);
 COMMIT;
 
 -- ----------------------------
