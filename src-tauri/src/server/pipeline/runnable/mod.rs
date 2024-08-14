@@ -9,7 +9,7 @@ use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::pool::Pool;
-use crate::server::pipeline::props::{PipelineRunSnapshot, PipelineRunStage, PipelineRuntime, PipelineStageTask, PipelineStatus};
+use crate::server::pipeline::props::{PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeStage, PipelineStageTask, PipelineStatus};
 use crate::POOLS;
 use lazy_static::lazy_static;
 use log::{error, info};
@@ -25,19 +25,29 @@ pub struct PipelineRunnable;
 impl PipelineRunnable {
     /// 添加到线程池中,需要过滤重复数据,以最后一条为主
     pub(crate) async fn exec(props: &PipelineRuntime) -> Result<HttpResponse, String> {
-        if props.id.is_empty() {
-            return Ok(get_error_response("运行流水线失败, `id` 不能为空"));
+        if props.pipeline_id.is_empty() {
+            return Ok(get_error_response("运行流水线失败, `pipelineId` 不能为空"));
         }
 
-        /*
         if props.server_id.is_empty() {
-            return Ok(get_error_response("运行流水线失败, `server_id` 不能为空"));
+            return Ok(get_error_response("运行流水线失败, `serverId` 不能为空"));
         }
-         */
 
         let mut pipeline = Pipeline::default();
-        pipeline.id = props.id.clone();
-        // pipeline.server_id = props.server_id.clone();
+        pipeline.id = props.pipeline_id.clone();
+        pipeline.server_id = props.server_id.clone();
+
+        // 查询流水线是否存在
+        info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
+        let response = Pipeline::get_query_list(&pipeline, None).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let data: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if data.is_empty() {
+            return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
+        }
 
         // 插入到线程池
         Self::insert_into_pool(props, &pipeline).await?;
@@ -117,9 +127,9 @@ impl PipelineRunnable {
         update_order: bool,
         status: Option<PipelineStatus>,
         start_time: Option<String>,
-        runnable: Option<PipelineRunSnapshot>,
+        runnable: Option<PipelineRuntimeSnapshot>,
         duration: Option<u32>,
-        stage: Option<PipelineRunStage>,
+        stage: PipelineRuntimeStage,
         branch: Option<String>,
         insert_current_into_history: bool,
     ) -> Result<HttpResponse, String> {
@@ -264,7 +274,7 @@ impl PipelineRunnable {
     }
 
     /// 结束
-    pub(crate) fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage: Option<PipelineRunStage>, success: bool, msg: &str, order: u32, status: Option<PipelineStatus>) -> Option<Pipeline> {
+    pub(crate) fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage: PipelineRuntimeStage, success: bool, msg: &str, order: u32, status: Option<PipelineStatus>) -> Option<Pipeline> {
         let err = if success { "成功" } else { "失败" };
 
         let msg = format!("{} {} !", msg, err);
@@ -286,8 +296,8 @@ impl PipelineRunnable {
     }
 
     /// 更新 stage 状态
-    pub(crate) fn update_stage(pipeline: &Pipeline, props: &PipelineRuntime, stage: Option<PipelineRunStage>, status: Option<PipelineStatus>) -> Result<Pipeline, String> {
-        if stage.is_none() && status.is_none() {
+    pub(crate) fn update_stage(pipeline: &Pipeline, props: &PipelineRuntime, stage: PipelineRuntimeStage, status: Option<PipelineStatus>) -> Result<Pipeline, String> {
+        if status.is_none() {
             return Ok(pipeline.clone());
         }
 

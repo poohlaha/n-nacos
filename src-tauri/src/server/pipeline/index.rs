@@ -9,10 +9,9 @@ use crate::helper::git::GitHandler;
 use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
-use crate::server::index::Server;
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{
-    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRunVariable, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable,
+    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable,
     RunnableVariable,
 };
 use async_trait::async_trait;
@@ -21,6 +20,7 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::mysql::{MySqlArguments, MySqlRow};
+use sqlx::query::Query;
 use sqlx::{FromRow, MySql, Row};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -54,7 +54,7 @@ pub struct Pipeline {
 
     #[serde(rename = "runnableInfo")]
     pub(crate) runnable_info: Option<RunnableVariable>, // 运行时的信息
-    pub(crate) runtime: Option<PipelineRuntime>, // 运行信息
+    pub(crate) runtime: Option<PipelineRuntime>, // 流水线运行的信息
 }
 
 impl<'r> FromRow<'r, MySqlRow> for Pipeline {
@@ -139,7 +139,7 @@ impl Treat2<HttpResponse> for Pipeline {
         // tag
         let tag = data.get(0).unwrap();
 
-        let mut query_list = Vec::new();
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
 
         // 插入 pipeline 表
         let pipeline_query = sqlx::query::<MySql>(
@@ -201,130 +201,13 @@ impl Treat2<HttpResponse> for Pipeline {
         .bind(&process_config.update_time);
         query_list.push(process_query);
 
-        fn insert_step_components(components: &Vec<PipelineStepComponent>, step_id: String, create_time: String, query_list: &mut Vec<sqlx::query::Query<MySql, MySqlArguments>>) {
-            if components.is_empty() {
-                return;
-            }
-
-            for component in components.iter() {
-                let step_component_id = Uuid::new_v4().to_string();
-                let step_component_query = sqlx::query::<MySql>(
-                    r#"
-                            INSERT INTO pipeline_step_component (id, step_id, prop, label, `value`, description, create_time, update_time)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        "#,
-                )
-                .bind(step_component_id.clone())
-                .bind(step_id.clone())
-                .bind(component.prop.clone())
-                .bind(component.label.clone())
-                .bind(component.value.clone())
-                .bind(component.description.clone())
-                .bind(create_time.clone())
-                .bind(component.update_time.clone());
-                query_list.push(step_component_query);
-            }
-        }
-
-        fn insert_steps(steps: &Vec<PipelineStep>, group_id: String, create_time: String, query_list: &mut Vec<sqlx::query::Query<MySql, MySqlArguments>>) {
-            if steps.is_empty() {
-                return;
-            }
-
-            for step in steps.iter() {
-                let step_id = Uuid::new_v4().to_string();
-                let step_query = sqlx::query::<MySql>(
-                    r#"
-            INSERT INTO pipeline_step (id, group_id, module, command, label, `status`, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-                )
-                .bind(step_id.clone())
-                .bind(group_id.clone())
-                .bind(PipelineCommandStatus::got(step.module.clone()))
-                .bind(step.command.clone())
-                .bind(step.label.clone())
-                .bind(PipelineStatus::got(step.status.clone()))
-                .bind(create_time.clone())
-                .bind(step.update_time.clone());
-                query_list.push(step_query);
-
-                // 5. 流水线步骤组件, 插入 pipeline_step_component 表
-                insert_step_components(&step.components, step_id.clone(), create_time.clone(), query_list);
-            }
-        }
-
-        fn insert_groups(groups: &Vec<PipelineGroup>, stage_id: String, create_time: String, query_list: &mut Vec<sqlx::query::Query<MySql, MySqlArguments>>) {
-            if groups.is_empty() {
-                return;
-            }
-
-            for group in groups.iter() {
-                let group_id = Uuid::new_v4().to_string();
-                let group_query = sqlx::query::<MySql>(
-                    r#"
-            INSERT INTO pipeline_group (id, stage_id, title, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?)
-        "#,
-                )
-                .bind(group_id.clone())
-                .bind(stage_id.clone())
-                .bind(group.title.clone())
-                .bind(create_time.clone())
-                .bind(group.update_time.clone());
-                query_list.push(group_query);
-
-                // 4. 流水线步骤, 插入 pipeline_step 表
-                insert_steps(&group.steps, group_id.clone(), create_time.clone(), query_list)
-            }
-        }
-
         // 2. 流水线阶段, 插入 pipeline_stage 表
-        let stages = &process_config.stages;
-        if !stages.is_empty() {
-            for (usize, stage) in stages.iter().enumerate() {
-                let stage_id = Uuid::new_v4().to_string();
-                let stage_query = sqlx::query::<MySql>(
-                    r#"
-            INSERT INTO pipeline_stage (id, process_id, history_id, `order`, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?)
-        "#,
-                )
-                .bind(stage_id.clone())
-                .bind(process_id.clone())
-                .bind("")
-                .bind(format!("{}", usize as u32 + 1))
-                .bind(&create_time)
-                .bind(&process_config.update_time);
-                query_list.push(stage_query);
-
-                // 3. 流水线分组, 插入 pipeline_group 表
-                insert_groups(&stage.groups, stage_id.clone(), create_time.clone(), &mut query_list);
-            }
-        }
+        Self::insert_stages(&process_config, process_id.clone(), create_time.clone(), &mut query_list);
 
         // 插入 pipeline_variable 表
         let variables = &pipeline_clone.variables;
         if !variables.is_empty() {
-            for variable in variables.iter() {
-                let variable_query = sqlx::query::<MySql>(
-                    r#"
-            INSERT INTO pipeline_variable (id, pipeline_id, `name`, genre, `value`, disabled, `require`, description, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-                )
-                .bind(Uuid::new_v4().to_string().clone())
-                .bind(&pipeline_clone.id)
-                .bind(&variable.name)
-                .bind(&variable.genre)
-                .bind(&variable.value)
-                .bind(&variable.disabled)
-                .bind(&variable.require)
-                .bind(&variable.description)
-                .bind(&create_time)
-                .bind(&basic.update_time);
-                query_list.push(variable_query);
-            }
+            Self::insert_variables(pipeline_clone.id.clone(), create_time.clone(), basic.update_time.clone(), &pipeline_clone.variables, &mut query_list);
         }
 
         return DBHelper::batch_commit(query_list).await;
@@ -378,12 +261,170 @@ impl Treat2<HttpResponse> for Pipeline {
 
     /// 更新
     async fn update(pipeline: &Self::B) -> Result<HttpResponse, String> {
+        if pipeline.id.is_empty() {
+            return Ok(get_error_response("更新流水线失败, `id` 不能为空"));
+        }
+
         let res = Self::validate(&pipeline);
         if let Some(res) = res {
             return Ok(res);
         }
 
         info!("update pipeline params: {:#?}", pipeline);
+        let response = Self::get_query_list(&pipeline, None).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let data: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if data.is_empty() {
+            return Ok(get_error_response("更新流水线失败, 该流水线不存在"));
+        }
+
+        if data.len() > 1 {
+            return Ok(get_error_response("更新流水线失败, 存在多条相同的流水线"));
+        }
+
+        let pi = data.get(0).unwrap();
+        let process_id = &pi.process_config.id;
+
+        // 更新
+        // 流水线阶段, 插入 pipeline_stage 表
+        let create_time = Utils::get_date(None); // 创建时间
+        let update_time = Utils::get_date(None); // 创建时间
+        let basic = &pipeline.basic;
+        let mut query_list = Vec::new();
+
+        // 删除 variables 并重新插入
+        let variable_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_variable WHERE pipeline_id = ?
+        "#,
+        )
+        .bind(&pipeline.id);
+        query_list.push(variable_delete_query);
+
+        // 删除 stage
+        let stage_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_stage
+            WHERE process_id IN (
+                SELECT p.id
+                FROM pipeline_process p
+                WHERE p.pipeline_id = ?
+            );
+        "#,
+        )
+        .bind(&pipeline.id);
+        query_list.push(stage_delete_query);
+
+        // 删除 group
+        let group_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_group
+            WHERE stage_id IN (
+                SELECT s.id FROM pipeline_stage s
+                WHERE s.process_id IN (
+                    SELECT p.id
+                    FROM pipeline_process p
+                    WHERE p.pipeline_id = ?
+                )
+            )
+        "#,
+        )
+        .bind(&pipeline.id);
+        query_list.push(group_delete_query);
+
+        // 删除 step
+        let step_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_step
+            WHERE group_id IN (
+                SELECT g.id FROM pipeline_group g
+                WHERE g.stage_id IN (
+                    SELECT s.id FROM pipeline_stage s
+                    WHERE s.process_id IN (
+                        SELECT p.id
+                        FROM pipeline_process p
+                        WHERE p.pipeline_id = ?
+                    )
+                )
+            )
+        "#,
+        )
+        .bind(&pipeline.id);
+        query_list.push(step_delete_query);
+
+        // 删除 step_component
+        let step_component_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_step_component
+            WHERE step_id IN (
+                SELECT id FROM pipeline_step
+                WHERE group_id IN (
+                    SELECT g.id FROM pipeline_group g
+                    WHERE g.stage_id IN (
+                        SELECT s.id FROM pipeline_stage s
+                        WHERE s.process_id IN (
+                            SELECT p.id
+                            FROM pipeline_process p
+                            WHERE p.pipeline_id = ?
+                        )
+                    )
+                )
+            )
+        "#,
+        )
+        .bind(&pipeline.id);
+        query_list.push(step_component_delete_query);
+
+        // 插入 stages
+        Self::insert_stages(&pipeline.process_config, process_id.clone(), create_time.clone(), &mut query_list);
+
+        // 插入 variables 表
+        let variables = &pipeline.variables;
+        if !variables.is_empty() {
+            Self::insert_variables(pipeline.id.clone(), create_time.clone(), basic.update_time.clone(), &pipeline.variables, &mut query_list);
+        }
+
+        // 更新 pipeline 表 update_time
+        let pipeline_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE pipeline SET update_time = ? WHERE id = ?
+        "#,
+        )
+        .bind(update_time.clone())
+        .bind(&pipeline.id);
+        query_list.push(pipeline_query);
+
+        // 更新基本信息
+        let basic_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE
+                pipeline_basic
+            SET
+                update_time = ?, `name` = ?, path = ?, description = ?
+            WHERE
+                pipeline_id = ?
+        "#,
+        )
+        .bind(update_time.clone())
+        .bind(&basic.name)
+        .bind(&basic.path)
+        .bind(&basic.description)
+        .bind(&pipeline.id); // 不给修改 tag
+        query_list.push(basic_query);
+
+        // 更新 pipeline_process 中的 update_time
+        let pipeline_process_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE pipeline_process SET update_time = ? WHERE pipeline_id = ?
+        "#,
+        )
+        .bind(update_time.clone())
+        .bind(&pipeline.id);
+        query_list.push(pipeline_process_query);
+
         /*
         let data = Self::get_query_list(&pipeline, None).await;
         return match data {
@@ -433,7 +474,7 @@ impl Treat2<HttpResponse> for Pipeline {
             Err(_) => Ok(get_error_response("更新流水线失败")),
         };
          */
-        Ok(get_error_response("更新流水线失败"))
+        return DBHelper::batch_commit(query_list).await;
     }
 
     /// 删除
@@ -540,8 +581,7 @@ impl Pipeline {
                 s.update_time as process_update_time,
                 e.id as stage_id,
                 e.process_id as stage_process_id,
-                e.history_id as stage_history_id,
-		        CAST(e.order AS UNSIGNED) as stage_order,
+		        CAST(e.`order` AS UNSIGNED) as stage_order,
                 e.create_time as stage_create_time,
                 e.update_time as stage_update_time,
                 g.id as group_id,
@@ -559,6 +599,7 @@ impl Pipeline {
                 sp.update_time as step_update_time,
                 v.id as variable_id,
                 v.pipeline_id as variable_pipeline_id,
+                CAST(v.`order` AS UNSIGNED) as variable_order,
                 v.`name` as variable_name,
                 v.genre as variable_genre,
                 v.`value` as variable_value,
@@ -592,7 +633,7 @@ impl Pipeline {
         sql.push_str(&format!(" WHERE p.server_id = '{}' ", pipeline.server_id));
 
         if !pipeline.id.is_empty() {
-            sql.push_str(&format!(" AND b.id = '{}'", pipeline.id))
+            sql.push_str(&format!(" AND p.id = '{}'", pipeline.id))
         }
 
         if query_form.is_some() {
@@ -613,11 +654,11 @@ impl Pipeline {
         sql.push_str(
             r#"
             GROUP BY
-                    p.id, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
+                    p.id, b.id, t.`value`, s.id, e.id, g.id, sp.id, c.id, v.id, v.`order`, v.`name`, v.genre, v.`value`, v.disabled, v.`require`, v.description, v.create_time, v.update_time
             ORDER BY
             CASE
                 WHEN
-                     p.update_time IS NULL
+                     p.update_time IS NULL or p.update_time = ''
                 THEN
                      0
                 ELSE
@@ -681,8 +722,9 @@ impl Pipeline {
             // variables
             let variable_id = row.try_get("variable_id").unwrap_or(String::new());
             variable_map.entry(variable_id.clone()).or_insert_with(|| PipelineVariable {
-                id: pipeline_id.to_string(),
+                id: variable_id.to_string(),
                 pipeline_id: row.try_get("pipeline_id").unwrap_or(None),
+                order: row.try_get("variable_order").unwrap_or(0),
                 name: row.try_get("variable_name").unwrap_or(String::new()),
                 genre: row.try_get("variable_genre").unwrap_or(String::new()),
                 value: row.try_get("variable_value").unwrap_or(String::new()),
@@ -708,7 +750,6 @@ impl Pipeline {
             stage_map.entry(stage_id.clone()).or_insert_with(|| PipelineStage {
                 id: stage_id.to_string(),
                 process_id: row.try_get("stage_process_id").unwrap_or(String::new()),
-                history_id: row.try_get("stage_history_id").unwrap_or(String::new()),
                 order: row.try_get("stage_order").unwrap_or(0),
                 groups: vec![],
                 create_time: row.try_get("stage_create_time").unwrap_or(None),
@@ -745,7 +786,7 @@ impl Pipeline {
             // step component
             let step_component_id = row.try_get("step_component_id").unwrap_or(String::new());
             step_component_map.entry(step_component_id.clone()).or_insert_with(|| PipelineStepComponent {
-                id: step_id.to_string(),
+                id: step_component_id.to_string(),
                 step_id: row.try_get("step_component_step_id").unwrap_or(String::new()),
                 prop: row.try_get("step_component_prop").unwrap_or(String::new()),
                 label: row.try_get("step_component_label").unwrap_or(String::new()),
@@ -835,6 +876,132 @@ impl Pipeline {
         }
 
         get_success_response_by_value(list)
+    }
+
+    fn insert_stages(process_config: &PipelineProcess, process_id: String, create_time: String, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+        fn insert_step_components(components: &Vec<PipelineStepComponent>, step_id: String, create_time: String, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+            if components.is_empty() {
+                return;
+            }
+
+            for component in components.iter() {
+                let step_component_id = Uuid::new_v4().to_string();
+                let step_component_query = sqlx::query::<MySql>(
+                    r#"
+                            INSERT INTO pipeline_step_component (id, step_id, prop, label, `value`, description, create_time, update_time)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        "#,
+                )
+                .bind(step_component_id.clone())
+                .bind(step_id.clone())
+                .bind(component.prop.clone())
+                .bind(component.label.clone())
+                .bind(component.value.clone())
+                .bind(component.description.clone())
+                .bind(create_time.clone())
+                .bind(component.update_time.clone());
+                query_list.push(step_component_query);
+            }
+        }
+
+        fn insert_steps(steps: &Vec<PipelineStep>, group_id: String, create_time: String, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+            if steps.is_empty() {
+                return;
+            }
+
+            for step in steps.iter() {
+                let step_id = Uuid::new_v4().to_string();
+                let step_query = sqlx::query::<MySql>(
+                    r#"
+            INSERT INTO pipeline_step (id, group_id, module, command, label, `status`, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+                )
+                .bind(step_id.clone())
+                .bind(group_id.clone())
+                .bind(PipelineCommandStatus::got(step.module.clone()))
+                .bind(step.command.clone())
+                .bind(step.label.clone())
+                .bind(PipelineStatus::got(step.status.clone()))
+                .bind(create_time.clone())
+                .bind(step.update_time.clone());
+                query_list.push(step_query);
+
+                // 5. 流水线步骤组件, 插入 pipeline_step_component 表
+                insert_step_components(&step.components, step_id.clone(), create_time.clone(), query_list);
+            }
+        }
+
+        fn insert_groups(groups: &Vec<PipelineGroup>, stage_id: String, create_time: String, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+            if groups.is_empty() {
+                return;
+            }
+
+            for group in groups.iter() {
+                let group_id = Uuid::new_v4().to_string();
+                let group_query = sqlx::query::<MySql>(
+                    r#"
+            INSERT INTO pipeline_group (id, stage_id, title, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?)
+        "#,
+                )
+                .bind(group_id.clone())
+                .bind(stage_id.clone())
+                .bind(group.title.clone())
+                .bind(create_time.clone())
+                .bind(group.update_time.clone());
+                query_list.push(group_query);
+
+                // 4. 流水线步骤, 插入 pipeline_step 表
+                insert_steps(&group.steps, group_id.clone(), create_time.clone(), query_list)
+            }
+        }
+
+        let stages = &process_config.stages;
+        if !stages.is_empty() {
+            for (usize, stage) in stages.iter().enumerate() {
+                let stage_id = Uuid::new_v4().to_string();
+                let stage_query = sqlx::query::<MySql>(
+                    r#"
+            INSERT INTO pipeline_stage (id, process_id, `order`, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?)
+        "#,
+                )
+                .bind(stage_id.clone())
+                .bind(process_id.clone())
+                .bind(format!("{}", usize as u32 + 1))
+                .bind(create_time.clone())
+                .bind(process_config.update_time.clone());
+                query_list.push(stage_query);
+
+                // 3. 流水线分组, 插入 pipeline_group 表
+                insert_groups(&stage.groups, stage_id.clone(), create_time.clone(), query_list);
+            }
+        }
+    }
+
+    fn insert_variables(pipeline_id: String, create_time: String, update_time: Option<String>, variables: &Vec<PipelineVariable>, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+        for variable in variables.iter() {
+            let variable_query = sqlx::query::<MySql>(
+                r#"
+            INSERT INTO pipeline_variable (
+                id, pipeline_id, `order`, `name`, genre, `value`, disabled, `require`, description, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            )
+            .bind(Uuid::new_v4().to_string().clone())
+            .bind(pipeline_id.clone())
+            .bind(variable.order.clone())
+            .bind(variable.name.clone())
+            .bind(variable.genre.clone())
+            .bind(variable.value.clone())
+            .bind(variable.disabled.clone())
+            .bind(variable.require.clone())
+            .bind(variable.description.clone())
+            .bind(create_time.clone())
+            .bind(update_time.clone());
+            query_list.push(variable_query);
+        }
     }
 
     /// 流水线存储名字: PIPELINE_NAME_流水线ID

@@ -4,8 +4,7 @@ use crate::database::Database;
 use crate::error::Error;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{PipelineRunStage, PipelineStageTask, PipelineStatus};
-use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
+use crate::server::pipeline::props::{PipelineRuntimeStage, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
 use handlers::utils::Utils;
@@ -15,6 +14,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
+use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 
 /// 存储流水线线程名称
 const PIPELINE_POOLS_NAME: &str = "pipeline_pools";
@@ -99,14 +99,14 @@ impl Pool {
         let start_time = Utils::get_date(None);
         let res = PipelineRunnable::update_current_pipeline(&pipeline, props, true, Some(status.clone()), Some(start_time), None, None, props_stage, None, false);
 
-        let mut error_stage = PipelineRunStage::default();
+        let mut error_stage = PipelineRuntimeStage::default();
         error_stage.stage_index = 1;
         // error_stage.status = Some(PipelineStatus::Failed);
 
         if let Some(res) = res.clone().ok() {
             let pipe: Result<Pipeline, String> = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string());
             if pipe.is_err() {
-                PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, "exec stages failed, `pipeline` prop is empty !", stage.order, Some(PipelineStatus::Failed));
+                PipelineRunnable::exec_end_log(app, &pipeline, &props, error_stage.clone(), false, "exec stages failed, `pipeline` prop is empty !", stage.order, Some(PipelineStatus::Failed));
                 return;
             }
 
@@ -117,7 +117,7 @@ impl Pool {
         }
 
         let msg = format!("update pipeline error: {:#?}, exec task step ", res.err());
-        PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(error_stage.clone()), false, &msg, stage.order, Some(PipelineStatus::Failed));
+        PipelineRunnable::exec_end_log(app, &pipeline, &props, error_stage.clone(), false, &msg, stage.order, Some(PipelineStatus::Failed));
     }
 
     /// 从 database 中读取任务列表

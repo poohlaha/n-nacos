@@ -43,8 +43,6 @@ pub struct PipelineStage {
     pub(crate) id: String,
     #[serde(rename = "processId")]
     pub(crate) process_id: String,
-    #[serde(rename = "historyId")]
-    pub(crate) history_id: String, // 历史表ID
     pub(crate) order: u32, // 顺序
     pub(crate) groups: Vec<PipelineGroup>,
     #[serde(rename = "createTime")]
@@ -183,6 +181,7 @@ pub struct PipelineVariable {
     pub(crate) id: String,
     #[serde(rename = "pipelineId")]
     pub(crate) pipeline_id: Option<String>,
+    pub(crate) order: u32,       // 顺序
     pub(crate) name: String,     // 变量名
     pub(crate) genre: String,    // 变量类型
     pub(crate) value: String,    // 值
@@ -306,7 +305,7 @@ impl PipelineStatus {
 }
 
 /// 流水线运行属性
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineRunVariable {
     #[serde(rename = "projectName")]
     pub(crate) project_name: String, // 名称
@@ -317,21 +316,24 @@ pub struct PipelineRunVariable {
 }
 
 /// 当前运行流水线
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineRuntime {
-    pub(crate) id: String,
+    pub(crate) id: Option<String>,
     #[serde(rename = "pipelineId")]
     pub(crate) pipeline_id: String,
-    pub(crate) order: u32,                      // 顺序
-    pub(crate) stage: Option<PipelineRunStage>, // stage 运行到哪一步
+    #[serde(rename = "serverId")]
+    pub(crate) server_id: String,
+    pub(crate) tag: PipelineTag,
+    pub(crate) order: Option<u32>,            // 顺序
+    pub(crate) basic: Option<PipelineBasic>, // 基本信息
+    pub(crate) stage: PipelineRuntimeStage, // stage 运行到哪一步
     pub(crate) stages: Vec<PipelineStage>,      // 构建过程
-    pub(crate) status: PipelineStatus,          // 运行状态
+    pub(crate) status: Option<PipelineStatus>,          // 运行状态
     #[serde(rename = "startTime")]
-    pub(crate) start_time: String, // 开始时间
-    pub(crate) duration: String,                // 运行时长, 单位秒
-    pub(crate) tag: PipelineTag,                // 标签
-    pub(crate) snapshot: Option<PipelineRunSnapshot>, // 运行时快照
-    pub(crate) log: String,                     // 日志, 根据 {server_id/id/order}.log 来读取
+    pub(crate) start_time: Option<String>,              // 开始时间
+    pub(crate) duration: Option<String>,                // 运行时长, 单位秒
+    pub(crate) snapshot: PipelineRuntimeSnapshot, // 运行时快照
+    pub(crate) log: Option<String>,                     // 日志, 根据 {server_id/id/order}.log 来读取
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
@@ -339,11 +341,8 @@ pub struct PipelineRuntime {
 }
 
 /// 当前流水线步骤
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineRunStage {
-    pub(crate) id: String,
-    #[serde(rename = "historyId")]
-    pub(crate) history_id: String,
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineRuntimeStage {
     #[serde(rename = "stageIndex")]
     pub(crate) stage_index: u32, // stage 运行到哪一步, 从 1 开始计算
     #[serde(rename = "groupIndex")]
@@ -351,27 +350,21 @@ pub struct PipelineRunStage {
     #[serde(rename = "stepIndex")]
     pub(crate) step_index: u32, // step 运行到哪一步, 从 0 开始计算
     pub(crate) finished: bool, // 是否完成
-    #[serde(rename = "createTime")]
-    pub(crate) create_time: Option<String>, // 创建时间
-    #[serde(rename = "updateTime")]
-    pub(crate) update_time: Option<String>, // 修改时间
 }
 
 /// 流水线运行时的属性
-#[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineRunSnapshot {
-    pub(crate) id: String, // 流水线ID,
-    #[serde(rename = "historyId")]
-    pub(crate) history_id: String, // 历史记录 ID,
-    // pub(crate) stage: PipelineCurrentRunStage, // stage
-    pub(crate) tag: PipelineTag, // 流水线 Tag
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineRuntimeSnapshot {
+    pub(crate) id: Option<String>, // ID,
+    #[serde(rename = "runtimeId")]
+    pub(crate) runtime_id: String, // 运行记录 ID,
     pub(crate) node: String,     // nodeJs 版本号
     pub(crate) branch: String,   // 分支
     pub(crate) make: String,     // Make 命令
     pub(crate) command: String,  // 本机安装的命令
     pub(crate) script: String,   // package.json 中的 scripts 命令
-    #[serde(rename = "variables")]
-    pub(crate) variables: Vec<PipelineHistoryVariable>, // 启动变量选中的值
+    #[serde(rename = "runnableVariables")]
+    pub(crate) runnable_variables: Vec<PipelineRuntimeVariable>, // 运行的启动变量
     pub(crate) remark: String,   // 备注
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
@@ -379,14 +372,17 @@ pub struct PipelineRunSnapshot {
     pub(crate) update_time: Option<String>, // 修改时间
 }
 
-/// 启动变量历史
+/// 流水线运行的启动变量
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PipelineHistoryVariable {
-    pub(crate) id: String,
+pub struct PipelineRuntimeVariable {
+    pub(crate) id: Option<String>,
     #[serde(rename = "snapshotId")]
-    pub(crate) snapshot_id: String, // 快照 ID,
+    pub(crate) snapshot_id: Option<String>, // 快照 ID,
+    pub(crate) order: u32,       // 顺序
     pub(crate) name: String,
     pub(crate) value: String,
+    #[serde(rename = "desc")]
+    pub(crate) description: String,
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
     #[serde(rename = "updateTime")]
