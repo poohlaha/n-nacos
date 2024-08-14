@@ -10,7 +10,7 @@ use crate::prepare::{convert_res, get_error_response, get_success_response_by_va
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRuntimeStage, PipelineRunnableStageStep, PipelineRuntime, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag, PipelineRuntimeVariable};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeStage, PipelineRuntimeVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
 use sftp::config::Upload;
@@ -60,16 +60,7 @@ impl PipelineRunnableStage {
             let mut error_stage = PipelineRuntimeStage::default();
             // error_stage.status = Some(PipelineStatus::Failed);
             error_stage.stage_index = 1;
-            PipelineRunnable::exec_end_log(
-                app,
-                &pipeline,
-                &task.props,
-                error_stage.clone(),
-                false,
-                "exec stages failed, `pipeline` prop is empty !",
-                task.order,
-                Some(PipelineStatus::Failed),
-            );
+            PipelineRunnable::exec_end_log(app, &pipeline, &task.props, error_stage.clone(), false, "exec stages failed, `pipeline` prop is empty !", task.order, Some(PipelineStatus::Failed));
             return;
         }
 

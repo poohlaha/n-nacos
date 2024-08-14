@@ -324,16 +324,16 @@ pub struct PipelineRuntime {
     #[serde(rename = "serverId")]
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
-    pub(crate) order: Option<u32>,            // 顺序
-    pub(crate) basic: Option<PipelineBasic>, // 基本信息
-    pub(crate) stage: PipelineRuntimeStage, // stage 运行到哪一步
-    pub(crate) stages: Vec<PipelineStage>,      // 构建过程
-    pub(crate) status: Option<PipelineStatus>,          // 运行状态
+    pub(crate) order: Option<u32>,             // 顺序
+    pub(crate) basic: Option<PipelineBasic>,   // 基本信息
+    pub(crate) stage: PipelineRuntimeStage,    // stage 运行到哪一步
+    pub(crate) stages: Vec<PipelineStage>,     // 构建过程
+    pub(crate) status: Option<PipelineStatus>, // 运行状态
     #[serde(rename = "startTime")]
-    pub(crate) start_time: Option<String>,              // 开始时间
-    pub(crate) duration: Option<String>,                // 运行时长, 单位秒
+    pub(crate) start_time: Option<String>, // 开始时间
+    pub(crate) duration: Option<String>,       // 运行时长, 单位秒
     pub(crate) snapshot: PipelineRuntimeSnapshot, // 运行时快照
-    pub(crate) log: Option<String>,                     // 日志, 根据 {server_id/id/order}.log 来读取
+    pub(crate) log: Option<String>,            // 日志, 根据 {server_id/id/order}.log 来读取
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
@@ -358,14 +358,14 @@ pub struct PipelineRuntimeSnapshot {
     pub(crate) id: Option<String>, // ID,
     #[serde(rename = "runtimeId")]
     pub(crate) runtime_id: String, // 运行记录 ID,
-    pub(crate) node: String,     // nodeJs 版本号
-    pub(crate) branch: String,   // 分支
-    pub(crate) make: String,     // Make 命令
-    pub(crate) command: String,  // 本机安装的命令
-    pub(crate) script: String,   // package.json 中的 scripts 命令
+    pub(crate) node: String,       // nodeJs 版本号
+    pub(crate) branch: String,     // 分支
+    pub(crate) make: String,       // Make 命令
+    pub(crate) command: String,    // 本机安装的命令
+    pub(crate) script: String,     // package.json 中的 scripts 命令
     #[serde(rename = "runnableVariables")]
     pub(crate) runnable_variables: Vec<PipelineRuntimeVariable>, // 运行的启动变量
-    pub(crate) remark: String,   // 备注
+    pub(crate) remark: String,     // 备注
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
@@ -378,7 +378,7 @@ pub struct PipelineRuntimeVariable {
     pub(crate) id: Option<String>,
     #[serde(rename = "snapshotId")]
     pub(crate) snapshot_id: Option<String>, // 快照 ID,
-    pub(crate) order: u32,       // 顺序
+    pub(crate) order: u32, // 顺序
     pub(crate) name: String,
     pub(crate) value: String,
     #[serde(rename = "desc")]
