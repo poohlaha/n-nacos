@@ -324,16 +324,16 @@ pub struct PipelineRuntime {
     #[serde(rename = "serverId")]
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
-    pub(crate) order: Option<u32>,             // 顺序
-    pub(crate) basic: Option<PipelineBasic>,   // 基本信息
-    pub(crate) stage: PipelineRuntimeStage,    // stage 运行到哪一步
-    pub(crate) stages: Vec<PipelineStage>,     // 构建过程
-    pub(crate) status: Option<PipelineStatus>, // 运行状态
+    pub(crate) order: Option<u32>,           // 顺序
+    pub(crate) basic: Option<PipelineBasic>, // 基本信息
+    pub(crate) stage: PipelineRuntimeStage,  // stage 运行到哪一步
+    pub(crate) stages: Vec<PipelineStage>,   // 构建过程
+    pub(crate) status: PipelineStatus,       // 运行状态
     #[serde(rename = "startTime")]
     pub(crate) start_time: Option<String>, // 开始时间
-    pub(crate) duration: Option<String>,       // 运行时长, 单位秒
+    pub(crate) duration: Option<String>,     // 运行时长, 单位秒
     pub(crate) snapshot: PipelineRuntimeSnapshot, // 运行时快照
-    pub(crate) log: Option<String>,            // 日志, 根据 {server_id/id/order}.log 来读取
+    pub(crate) log: Option<String>,          // 日志, 根据 {server_id/id/order}.log 来读取
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]

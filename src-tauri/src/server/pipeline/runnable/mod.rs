@@ -2,6 +2,7 @@
 
 pub(crate) mod stage;
 
+use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
@@ -11,10 +12,16 @@ use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::{PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeStage, PipelineStageTask, PipelineStatus};
 use crate::POOLS;
+use handlers::utils::Utils;
 use lazy_static::lazy_static;
 use log::{error, info};
+use serde_json::Value;
+use sqlx::mysql::MySqlArguments;
+use sqlx::query::Query;
+use sqlx::{MySql, Row};
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
+use uuid::Uuid;
 
 // 共享 pipeline 数据
 lazy_static! {
@@ -23,7 +30,7 @@ lazy_static! {
 pub struct PipelineRunnable;
 
 impl PipelineRunnable {
-    /// 添加到线程池中,需要过滤重复数据,以最后一条为主
+    /// 添加到线程池中, 以最后一条为主
     pub(crate) async fn exec(props: &PipelineRuntime) -> Result<HttpResponse, String> {
         if props.pipeline_id.is_empty() {
             return Ok(get_error_response("运行流水线失败, `pipelineId` 不能为空"));
@@ -49,8 +56,59 @@ impl PipelineRunnable {
             return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
         }
 
+        if data.len() > 1 {
+            return Ok(get_error_response("运行流水线失败, 该存在多条相同的流水线"));
+        }
+
+        let pipe = data.get(0).unwrap();
+
+        // 查询 pipeline_runtime order
+        let runtime_order_query = sqlx::query(
+            r#"
+            select MAX(CAST(`order` AS UNSIGNED)) AS max_order FROM pipeline_runtime WHERE pipeline_id = ?
+          "#,
+        )
+        .bind(&pipe.id);
+
+        let mut order: u32 = 1;
+        let rows = DBHelper::execute_rows(runtime_order_query).await?;
+        if !rows.is_empty() {
+            let row = rows.get(0);
+            if let Some(row) = row {
+                order = row.try_get("max_order").unwrap_or(0);
+            }
+        }
+
+        // 插入到数据库
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+        let stage = &props.stage;
+        let create_time = Utils::get_date(None);
+
+        // 插入到 pipeline_runtime 表
+        let basic_str = serde_json::to_string(&pipe.basic).unwrap_or(String::from(""));
+        let stages_str = serde_json::to_string(&pipe.process_config.stages).unwrap_or(String::from(""));
+        let process_query = sqlx::query::<MySql>(
+            r#"
+            INSERT INTO pipeline_runtime (
+                id, pipeline_id, order, basic, stages, `status`, stage_index, group_index, step_index, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&pipe.id)
+        .bind(format!("{}", order))
+        .bind(basic_str) // basic
+        .bind(stages_str) // stages
+        .bind(PipelineStatus::got(props.status.clone()))
+        .bind(format!("{}", stage.stage_index.clone()))
+        .bind(format!("{}", stage.group_index.clone()))
+        .bind(format!("{}", stage.step_index.clone()))
+        .bind(&create_time)
+        .bind("");
+        query_list.push(process_query);
+
         // 插入到线程池
-        Self::insert_into_pool(props, &pipeline).await?;
+        Self::insert_into_pool(props, &pipe).await?;
 
         // 更新线程池数据库
         let pools = POOLS.lock().unwrap();
@@ -64,9 +122,6 @@ impl PipelineRunnable {
     /// 放入线程池
     async fn insert_into_pool(props: &PipelineRuntime, pipeline: &Pipeline) -> Result<(), String> {
         info!("insert into pool: {:#?}", props);
-
-        let res = Pipeline::get_by_id(&pipeline).await?;
-        let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
         /*
         let run = pipeline.run;
