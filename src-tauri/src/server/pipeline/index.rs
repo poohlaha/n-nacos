@@ -144,7 +144,16 @@ impl Treat2<HttpResponse> for Pipeline {
         // 插入 pipeline 表
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            INSERT INTO pipeline (id, server_id, tag_id, last_run_time, duration, status, create_time, update_time)
+            INSERT INTO pipeline (
+            id,
+            server_id,
+            tag_id,
+            last_run_time,
+            duration,
+            status,
+            create_time,
+            update_time
+            )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         )
@@ -201,14 +210,16 @@ impl Treat2<HttpResponse> for Pipeline {
                 let step_component_id = Uuid::new_v4().to_string();
                 let step_component_query = sqlx::query::<MySql>(
                     r#"
-            INSERT INTO pipeline_step_component (id, step_id, prop, `value`, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?)
-        "#,
+                            INSERT INTO pipeline_step_component (id, step_id, prop, label, `value`, description, create_time, update_time)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        "#,
                 )
                 .bind(step_component_id.clone())
                 .bind(step_id.clone())
                 .bind(component.prop.clone())
+                .bind(component.label.clone())
                 .bind(component.value.clone())
+                .bind(component.description.clone())
                 .bind(create_time.clone())
                 .bind(component.update_time.clone());
                 query_list.push(step_component_query);
@@ -559,9 +570,11 @@ impl Pipeline {
                 c.id as step_component_id,
                 c.step_id as step_component_step_id,
                 c.prop as step_component_prop,
+                c.label as step_component_label,
+		        c.description as step_component_description,
                 c.`value` as step_component_value,
-                c.create_time as step_create_time,
-                c.update_time as step_update_time
+                c.create_time as step_component_create_time,
+		        c.update_time as step_component_update_time
             FROM
                  pipeline p
             LEFT JOIN pipeline_variable v on v.pipeline_id = p.id
@@ -652,7 +665,7 @@ impl Pipeline {
             map.entry(pipeline_id.clone()).or_insert_with(|| Pipeline {
                 id: pipeline_id.to_string(),
                 server_id: row.try_get("pipeline_server_id").unwrap_or(String::new()),
-                last_run_time: row.try_get("last_run_time").unwrap_or(None),
+                last_run_time: row.try_get("pipeline_last_run_time").unwrap_or(None),
                 tag,
                 status: Some(PipelineStatus::get(&status_str)),
                 duration: row.try_get("pipeline_duration").unwrap_or(String::new()),
@@ -661,8 +674,8 @@ impl Pipeline {
                 variables: vec![],
                 runnable_info: None,
                 runtime: None,
-                create_time: row.try_get("create_time").unwrap_or(None),
-                update_time: row.try_get("update_time").unwrap_or(None),
+                create_time: row.try_get("pipeline_create_time").unwrap_or(None),
+                update_time: row.try_get("pipeline_update_time").unwrap_or(None),
             });
 
             // variables
@@ -725,8 +738,8 @@ impl Pipeline {
                 label: row.try_get("step_label").unwrap_or(String::new()),
                 status: PipelineStatus::get(&step_status_str),
                 components: vec![],
-                create_time: row.try_get("group_create_time").unwrap_or(None),
-                update_time: row.try_get("group_update_time").unwrap_or(None),
+                create_time: row.try_get("step_create_time").unwrap_or(None),
+                update_time: row.try_get("step_update_time").unwrap_or(None),
             });
 
             // step component
@@ -735,9 +748,11 @@ impl Pipeline {
                 id: step_id.to_string(),
                 step_id: row.try_get("step_component_step_id").unwrap_or(String::new()),
                 prop: row.try_get("step_component_prop").unwrap_or(String::new()),
+                label: row.try_get("step_component_label").unwrap_or(String::new()),
+                description: row.try_get("step_component_description").unwrap_or(String::new()),
                 value: row.try_get("step_component_value").unwrap_or(String::new()),
-                create_time: row.try_get("group_create_time").unwrap_or(None),
-                update_time: row.try_get("group_update_time").unwrap_or(None),
+                create_time: row.try_get("step_component_create_time").unwrap_or(None),
+                update_time: row.try_get("step_component_update_time").unwrap_or(None),
             });
         }
 

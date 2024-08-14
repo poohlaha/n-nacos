@@ -91,6 +91,9 @@ pub struct PipelineStepComponent {
     #[serde(rename = "stepId")]
     pub(crate) step_id: String,
     pub(crate) prop: String,
+    pub(crate) label: String,
+    #[serde(rename = "desc")]
+    pub(crate) description: String,
     pub(crate) value: String,
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
