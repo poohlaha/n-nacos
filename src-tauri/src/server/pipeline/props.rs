@@ -325,7 +325,7 @@ pub struct PipelineRuntime {
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
     #[serde(rename = "projectName")]
-    pub(crate) project_name: Option<String>,  // 项目名称
+    pub(crate) project_name: Option<String>, // 项目名称
     pub(crate) order: Option<u32>,           // 顺序
     pub(crate) basic: Option<PipelineBasic>, // 基本信息
     pub(crate) stage: PipelineRuntimeStage,  // stage 运行到哪一步

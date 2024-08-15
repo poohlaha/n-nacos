@@ -6,6 +6,7 @@ use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
+use crate::helper::git::GitHandler;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
@@ -24,7 +25,6 @@ use std::str::ParseBoolError;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 use uuid::Uuid;
-use crate::helper::git::GitHandler;
 
 // 共享 pipeline 数据
 lazy_static! {
@@ -33,7 +33,6 @@ lazy_static! {
 pub struct PipelineRunnable;
 
 impl PipelineRunnable {
-
     /// 获取运行详情
     pub(crate) async fn get_runtime_detail(pipeline: &Pipeline) -> Result<Option<PipelineRuntime>, String> {
         if pipeline.id.is_empty() {
@@ -212,10 +211,10 @@ impl PipelineRunnable {
         }
 
         if let Some(runtime) = list.get(0) {
-            return Ok(Some(runtime.clone()))
+            return Ok(Some(runtime.clone()));
         }
 
-        return Ok(None)
+        return Ok(None);
     }
 
     /// 添加到线程池中, 以最后一条为主
