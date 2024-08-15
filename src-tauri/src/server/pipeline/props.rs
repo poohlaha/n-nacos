@@ -324,6 +324,8 @@ pub struct PipelineRuntime {
     #[serde(rename = "serverId")]
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
+    #[serde(rename = "projectName")]
+    pub(crate) project_name: Option<String>,  // 项目名称
     pub(crate) order: Option<u32>,           // 顺序
     pub(crate) basic: Option<PipelineBasic>, // 基本信息
     pub(crate) stage: PipelineRuntimeStage,  // stage 运行到哪一步
@@ -360,7 +362,7 @@ pub struct PipelineRuntimeSnapshot {
     pub(crate) runtime_id: String, // 运行记录 ID,
     pub(crate) node: String,       // nodeJs 版本号
     pub(crate) branch: String,     // 分支
-    pub(crate) make: Option<String>,       // Make 命令
+    pub(crate) make: Option<String>, // Make 命令
     pub(crate) command: String,    // 本机安装的命令
     pub(crate) script: String,     // package.json 中的 scripts 命令
     #[serde(rename = "runnableVariables")]

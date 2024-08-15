@@ -24,6 +24,8 @@ use sqlx::{FromRow, MySql, Row};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
+use crate::server::pipeline::runnable;
+use crate::server::pipeline::runnable::PipelineRunnable;
 
 /// 存储流水线数据库名称
 pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
@@ -40,7 +42,6 @@ pub struct Pipeline {
     pub(crate) last_run_time: Option<String>, // 最后运行时间
     pub(crate) tag: Option<PipelineTag>,       // 标签
     pub(crate) status: Option<PipelineStatus>, // 状态, 同步于 steps
-    pub(crate) duration: String,               // 运行时长, 单位秒
 
     pub(crate) basic: PipelineBasic, // 基本信息
     #[serde(rename = "processConfig")]
@@ -79,7 +80,6 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
             last_run_time: row.try_get("last_run_time")?,
             tag,
             status: Some(PipelineStatus::get(&status_str)),
-            duration: row.try_get("duration")?,
             create_time: row.try_get("create_time")?,
             update_time: row.try_get("update_time")?,
             basic,
@@ -148,18 +148,16 @@ impl Treat2<HttpResponse> for Pipeline {
             server_id,
             tag_id,
             last_run_time,
-            duration,
             status,
             create_time,
             update_time
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         "#,
         )
         .bind(&pipeline_clone.id)
         .bind(&pipeline_clone.server_id)
         .bind(tag.id.clone())
-        .bind("")
         .bind("")
         .bind(PipelineStatus::got(PipelineStatus::No))
         .bind(&create_time)
@@ -525,6 +523,11 @@ impl Treat2<HttpResponse> for Pipeline {
 
         let pipe = data.get(0).unwrap();
         let mut pipeline = pipe.clone();
+
+        // 查询运行详情
+        let runtime = PipelineRunnable::get_runtime_detail(&pipeline).await?;
+        pipeline.runtime = runtime;
+
         /*
         if let Some(mut run) = pipeline.run.clone() {
             let mut current = run.current.clone();
@@ -562,7 +565,6 @@ impl Pipeline {
                 p.server_id as pipeline_server_id,
                 p.tag_id as pipeline_tag_id,
                 p.last_run_time as pipeline_last_run_time,
-                p.duration as pipeline_duration,
                 p.`status` as pipeline_status,
                 p.create_time as pipeline_create_time,
                 p.update_time as pipeline_update_time,
@@ -708,7 +710,6 @@ impl Pipeline {
                 last_run_time: row.try_get("pipeline_last_run_time").unwrap_or(None),
                 tag,
                 status: Some(PipelineStatus::get(&status_str)),
-                duration: row.try_get("pipeline_duration").unwrap_or(String::new()),
                 basic,
                 process_config: Default::default(),
                 variables: vec![],
