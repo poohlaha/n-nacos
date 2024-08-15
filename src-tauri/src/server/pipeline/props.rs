@@ -360,7 +360,7 @@ pub struct PipelineRuntimeSnapshot {
     pub(crate) runtime_id: String, // 运行记录 ID,
     pub(crate) node: String,       // nodeJs 版本号
     pub(crate) branch: String,     // 分支
-    pub(crate) make: String,       // Make 命令
+    pub(crate) make: Option<String>,       // Make 命令
     pub(crate) command: String,    // 本机安装的命令
     pub(crate) script: String,     // package.json 中的 scripts 命令
     #[serde(rename = "runnableVariables")]

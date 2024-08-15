@@ -72,12 +72,15 @@ impl PipelineRunnable {
 
         let mut order: u32 = 1;
         let rows = DBHelper::execute_rows(runtime_order_query).await?;
+        info!("max order rows: {:#?}", rows);
         if !rows.is_empty() {
             let row = rows.get(0);
             if let Some(row) = row {
                 order = row.try_get("max_order").unwrap_or(0);
             }
         }
+
+        info!("max order: {}", order);
 
         // 插入到数据库
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
@@ -87,19 +90,20 @@ impl PipelineRunnable {
         // 插入到 pipeline_runtime 表
         let basic_str = serde_json::to_string(&pipe.basic).unwrap_or(String::from(""));
         let stages_str = serde_json::to_string(&pipe.process_config.stages).unwrap_or(String::from(""));
+        let runtime_id = Uuid::new_v4().to_string();
         let process_query = sqlx::query::<MySql>(
             r#"
             INSERT INTO pipeline_runtime (
-                id, pipeline_id, order, basic, stages, `status`, stage_index, group_index, step_index, create_time, update_time
+                id, pipeline_id, `order`, basic, stages, `status`, stage_index, group_index, step_index, create_time, update_time
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         )
-        .bind(Uuid::new_v4().to_string())
+        .bind(runtime_id.clone())
         .bind(&pipe.id)
         .bind(format!("{}", order))
         .bind(basic_str) // basic
         .bind(stages_str) // stages
-        .bind(PipelineStatus::got(props.status.clone()))
+        .bind(PipelineStatus::got(PipelineStatus::Queue)) // 排队中
         .bind(format!("{}", stage.stage_index.clone()))
         .bind(format!("{}", stage.group_index.clone()))
         .bind(format!("{}", stage.step_index.clone()))
@@ -107,16 +111,66 @@ impl PipelineRunnable {
         .bind("");
         query_list.push(process_query);
 
+        // 插入 pipeline_runtime_snapshot 表
+        let snapshot = &props.snapshot;
+        let snapshot_id = Uuid::new_v4().to_string();
+        let snapshot_query = sqlx::query::<MySql>(
+            r#"
+            INSERT INTO pipeline_runtime_snapshot (
+                id, runtime_id, node, branch, make, command, script, remark, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        )
+            .bind(snapshot_id.clone())
+            .bind(runtime_id.clone())
+            .bind(&snapshot.node)
+            .bind(&snapshot.branch)
+            .bind(&snapshot.make)
+            .bind(&snapshot.command)
+            .bind(&snapshot.script)
+            .bind(&snapshot.remark)
+            .bind(&create_time)
+            .bind("");
+        query_list.push(snapshot_query);
+
+        // 插入 pipeline_runtime_variable 表
+        let runnable_variables = &snapshot.runnable_variables;
+        if !runnable_variables.is_empty() {
+            for variable in runnable_variables.iter() {
+                let variable_query = sqlx::query::<MySql>(
+                    r#"
+            INSERT INTO pipeline_runtime_variable (
+                id, snapshot_id, `order`, name, `value`, description, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+                )
+                    .bind(Uuid::new_v4().to_string())
+                    .bind(snapshot_id.clone())
+                    .bind(&variable.order)
+                    .bind(&variable.name)
+                    .bind(&variable.value)
+                    .bind(&variable.description)
+                    .bind(&create_time)
+                    .bind("");
+                query_list.push(variable_query);
+            }
+        }
+
+        let response = DBHelper::batch_commit(query_list).await?;
+        if response.code != 200 {
+            return Ok(response)
+        }
+
         // 插入到线程池
-        Self::insert_into_pool(props, &pipe).await?;
+        // Self::insert_into_pool(props, &pipe).await?;
 
         // 更新线程池数据库
-        let pools = POOLS.lock().unwrap();
-        Pool::update(pools.clone())?;
+        // let pools = POOLS.lock().unwrap();
+        // Pool::update(pools.clone())?;
 
         // 更改流水线状态为 `排队中`
         // Self::update_current_pipeline(&pipeline, props, false, Some(PipelineStatus::Queue), None, Some(props.clone()), None, Some(props.stage.clone()), Some(props.branch.clone()), false)
-        Ok(get_error_response(""))
+        Ok(get_success_response(None))
     }
 
     /// 放入线程池
