@@ -1,7 +1,8 @@
 //! 流水线属性
 
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::mysql::MySqlRow;
+use sqlx::{FromRow, Row};
 
 /// 基本信息
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -336,10 +337,38 @@ pub struct PipelineRuntime {
     pub(crate) duration: Option<String>,     // 运行时长, 单位秒
     pub(crate) snapshot: PipelineRuntimeSnapshot, // 运行时快照
     pub(crate) log: Option<String>,          // 日志, 根据 {server_id/id/order}.log 来读取
+    pub(crate) remark: String,               //  运行备注
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>, // 修改时间
+}
+
+impl<'r> FromRow<'r, MySqlRow> for PipelineRuntime {
+    fn from_row(row: &MySqlRow) -> Result<Self, sqlx::Error> {
+        let tag_str: String = row.try_get("tag")?;
+        let status_str: String = row.try_get("status")?;
+
+        Ok(PipelineRuntime {
+            id: row.try_get("id")?,
+            pipeline_id: row.try_get("pipeline_id")?,
+            server_id: String::new(),
+            tag: PipelineTag::get(&tag_str),
+            project_name: None,
+            order: row.try_get("order")?,
+            basic: None,
+            stage: Default::default(),
+            stages: vec![],
+            status: PipelineStatus::get(&status_str),
+            start_time: row.try_get("start_time")?,
+            duration: row.try_get("duration")?,
+            snapshot: Default::default(),
+            log: None,
+            remark: row.try_get("remark")?,
+            create_time: row.try_get("create_time")?,
+            update_time: row.try_get("update_time")?,
+        })
+    }
 }
 
 /// 当前流水线步骤
@@ -367,7 +396,6 @@ pub struct PipelineRuntimeSnapshot {
     pub(crate) script: String,     // package.json 中的 scripts 命令
     #[serde(rename = "runnableVariables")]
     pub(crate) runnable_variables: Vec<PipelineRuntimeVariable>, // 运行的启动变量
-    pub(crate) remark: String,     // 备注
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]

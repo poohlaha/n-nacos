@@ -86,6 +86,15 @@ pub async fn pipeline_run(props: PipelineRuntime) -> Result<HttpResponse, String
     Task::task_param_future::<PipelineRuntime, _, _>(props.clone(), |pipe| async move { PipelineRunnable::exec(&*pipe).await }).await
 }
 
+/// 查看流水线运行历史
+#[tauri::command]
+pub async fn get_runtime_history(id: String, server_id: String) -> Result<HttpResponse, String> {
+    let mut pipeline = Pipeline::default();
+    pipeline.id = id.to_string();
+    pipeline.server_id = server_id.to_string();
+    Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move { PipelineRunnable::get_runtime_history(&*pipe).await }).await
+}
+
 /// 批量运行流水线
 #[tauri::command]
 pub async fn pipeline_batch_run(list: Vec<PipelineRuntime>) -> Result<HttpResponse, String> {

@@ -33,20 +33,36 @@ lazy_static! {
 pub struct PipelineRunnable;
 
 impl PipelineRunnable {
-    /// 获取运行详情
-    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline) -> Result<Option<PipelineRuntime>, String> {
+    /// 获取运行历史记录
+    pub(crate) async fn get_runtime_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
         if pipeline.id.is_empty() {
-            return Ok(None);
+            return Ok(get_error_response("查询历史记录失败, `pipelineId` 为空"));
         }
 
         if pipeline.server_id.is_empty() {
-            return Ok(None);
+            return Ok(get_error_response("查询历史记录失败, `serverId` 为空"));
         }
 
+        Self::get_runtime_detail(pipeline, false).await
+    }
+
+    /// 获取运行详情
+    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline, only_one: bool) -> Result<HttpResponse, String> {
+        if pipeline.id.is_empty() {
+            return Ok(get_error_response("`pipelineId` 为空"));
+        }
+
+        if pipeline.server_id.is_empty() {
+            return Ok(get_error_response("`serverId` 为空"));
+        }
+
+        let mut sql = String::from("");
+
         // 取最新一条
-        let sql = String::from(
-            r#"
-                 WITH LatestRuntime AS (
+        if only_one {
+            sql.push_str(
+                r#"
+             WITH LatestRuntime AS (
                     SELECT
                         r.pipeline_id,
                         MAX(r.create_time) AS latest_create_time
@@ -55,6 +71,12 @@ impl PipelineRunnable {
                     GROUP BY
                         r.pipeline_id
                 )
+            "#,
+            )
+        }
+
+        sql.push_str(
+            r#"
                 SELECT
                     r.id AS runtime_id,
                     r.pipeline_id AS runtime_pipeline_id,
@@ -65,6 +87,7 @@ impl PipelineRunnable {
 	                r.stages as runtime_stages,
                     r.`status` AS runtime_status,
                     r.start_time AS runtime_start_time,
+                    r.remark as runtime_remark,
                     r.duration AS runtime_duration,
                     CAST( r.stage_index AS UNSIGNED ) AS runtime_stage_index,
                     CAST( r.group_index AS UNSIGNED ) AS runtime_group_index,
@@ -80,7 +103,6 @@ impl PipelineRunnable {
                     s.make as runtime_snapshot_make,
                     s.command as runtime_snapshot_command,
                     s.script as runtime_snapshot_script,
-                    s.remark as runtime_snapshot_remark,
                     s.create_time as runtime_snapshot_create_time,
                     s.update_time as runtime_snapshot_update_time,
                     v.id as runtime_variable_id,
@@ -99,11 +121,11 @@ impl PipelineRunnable {
                     pipeline_id = ?
          "#,
         );
-        let query = sqlx::query(&sql).bind(&pipeline.id);
 
+        let query = sqlx::query(&sql).bind(&pipeline.id);
         let rows = DBHelper::execute_rows(query).await?;
         if rows.is_empty() {
-            return Ok(None);
+            return Ok(get_success_response(None));
         }
 
         // 组装数据
@@ -145,6 +167,7 @@ impl PipelineRunnable {
                 duration: row.try_get("runtime_duration").unwrap_or(None),
                 snapshot: Default::default(),
                 log: row.try_get("runtime_log").unwrap_or(None),
+                remark: row.try_get("runtime_remark").unwrap_or(String::new()),
                 create_time: row.try_get("runtime_create_time").unwrap_or(None),
                 update_time: row.try_get("runtime_update_time").unwrap_or(None),
             });
@@ -160,7 +183,6 @@ impl PipelineRunnable {
                 command: row.try_get("runtime_snapshot_command").unwrap_or(String::new()),
                 script: row.try_get("runtime_snapshot_script").unwrap_or(String::new()),
                 runnable_variables: vec![],
-                remark: row.try_get("runtime_snapshot_remark").unwrap_or(String::new()),
                 create_time: row.try_get("runtime_snapshot_create_time").unwrap_or(None),
                 update_time: row.try_get("runtime_snapshot_update_time").unwrap_or(None),
             });
@@ -207,14 +229,16 @@ impl PipelineRunnable {
 
         let mut list: Vec<PipelineRuntime> = map.into_values().collect();
         if list.len() == 0 {
-            return Ok(None);
+            return Ok(get_success_response(None));
         }
 
-        if let Some(runtime) = list.get(0) {
-            return Ok(Some(runtime.clone()));
+        if only_one {
+            if let Some(runtime) = list.get(0) {
+                return get_success_response_by_value(runtime.clone());
+            }
         }
 
-        return Ok(None);
+        return get_success_response_by_value(list);
     }
 
     /// 添加到线程池中, 以最后一条为主
@@ -273,6 +297,16 @@ impl PipelineRunnable {
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         let stage = &props.stage;
         let create_time = Utils::get_date(None);
+        let status = PipelineStatus::got(PipelineStatus::Queue); // 排队中
+
+        // 更新 pipeline 表 status
+        let pipeline_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE pipeline SET `status` = ?
+        "#,
+        )
+        .bind(&status);
+        query_list.push(pipeline_query);
 
         // 插入到 pipeline_runtime 表
         let basic_str = serde_json::to_string(&pipe.basic).unwrap_or(String::from(""));
@@ -281,8 +315,8 @@ impl PipelineRunnable {
         let process_query = sqlx::query::<MySql>(
             r#"
             INSERT INTO pipeline_runtime (
-                id, pipeline_id, project_name, `order`, tag, basic, stages, `status`, stage_index, group_index, step_index, finished, create_time, update_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, pipeline_id, project_name, `order`, tag, basic, stages, `status`, stage_index, group_index, step_index, finished, remark, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         )
         .bind(runtime_id.clone())
@@ -292,11 +326,12 @@ impl PipelineRunnable {
         .bind(PipelineTag::got(props.tag.clone()))
         .bind(basic_str) // basic
         .bind(stages_str) // stages
-        .bind(PipelineStatus::got(PipelineStatus::Queue)) // 排队中
+        .bind(&status) // 排队中
         .bind(format!("{}", stage.stage_index.clone()))
         .bind(format!("{}", stage.group_index.clone()))
         .bind(format!("{}", stage.step_index.clone()))
         .bind("false")
+        .bind(&props.remark)
         .bind(&create_time)
         .bind("");
         query_list.push(process_query);
@@ -307,8 +342,8 @@ impl PipelineRunnable {
         let snapshot_query = sqlx::query::<MySql>(
             r#"
             INSERT INTO pipeline_runtime_snapshot (
-                id, runtime_id, node, branch, make, command, script, remark, create_time, update_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, runtime_id, node, branch, make, command, script, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         )
         .bind(snapshot_id.clone())
@@ -318,7 +353,6 @@ impl PipelineRunnable {
         .bind(&snapshot.make)
         .bind(&snapshot.command)
         .bind(&snapshot.script)
-        .bind(&snapshot.remark)
         .bind(&create_time)
         .bind("");
         query_list.push(snapshot_query);

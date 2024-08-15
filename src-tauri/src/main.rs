@@ -23,7 +23,7 @@ use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
 use dotenvy::dotenv;
-use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
+use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
 use sqlx::mysql::MySqlPoolOptions;
@@ -110,6 +110,7 @@ async fn main() {
             delete_pipeline,
             get_pipeline_detail,
             pipeline_run,
+            get_runtime_history,
             query_os_commands,
             clear_run_history,
             pipeline_batch_run,

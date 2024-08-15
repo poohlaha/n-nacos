@@ -525,8 +525,13 @@ impl Treat2<HttpResponse> for Pipeline {
         let mut pipeline = pipe.clone();
 
         // 查询运行详情
-        let runtime = PipelineRunnable::get_runtime_detail(&pipeline).await?;
-        pipeline.runtime = runtime;
+        let response = PipelineRunnable::get_runtime_detail(&pipeline, true).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let runtime: PipelineRuntime = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        pipeline.runtime = Some(runtime);
 
         /*
         if let Some(mut run) = pipeline.run.clone() {
