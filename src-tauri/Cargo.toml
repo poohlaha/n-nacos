@@ -39,6 +39,7 @@ handlers = {git = "https://github.com/poohlaha/rust-tools", branch = "main", pac
 sftp = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "sftp", version = "0.1.9"}
 minimize = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "minimize", version = "0.1.1"}
 chrono = "0.4.35"
+futures = "0.3.30"
 # images-compressor = "1.0.3"
 
 [dependencies.uuid]

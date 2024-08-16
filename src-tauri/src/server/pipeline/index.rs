@@ -525,7 +525,7 @@ impl Treat2<HttpResponse> for Pipeline {
         let mut pipeline = pipe.clone();
 
         // 查询运行详情
-        let response = PipelineRunnable::get_runtime_detail(&pipeline, true).await?;
+        let response = PipelineRunnable::get_runtime_detail(&pipeline, true, None).await?;
         if response.code != 200 {
             return Ok(response);
         }
@@ -559,10 +559,6 @@ impl Treat2<HttpResponse> for Pipeline {
 impl Pipeline {
     /// 根据条件查询列表
     pub(crate) async fn get_query_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Result<HttpResponse, String> {
-        if pipeline.server_id.is_empty() {
-            return Ok(get_error_response("获取流水线列表失败, `server_id` 不能为空"));
-        }
-
         let mut sql = String::from(
             r#"
             SELECT
@@ -632,11 +628,13 @@ impl Pipeline {
             LEFT JOIN pipeline_group g on g.stage_id = e.id
             LEFT JOIN pipeline_step sp on sp.group_id = g.id
             LEFT JOIN pipeline_step_component c on c.step_id = sp.id
+            WHERE 1 = 1
         "#,
         );
 
-        // 添加 server_id
-        sql.push_str(&format!(" WHERE p.server_id = '{}' ", pipeline.server_id));
+        if !pipeline.server_id.is_empty() {
+            sql.push_str(&format!(" AND p.server_id = '{}' ", pipeline.server_id));
+        }
 
         if !pipeline.id.is_empty() {
             sql.push_str(&format!(" AND p.id = '{}'", pipeline.id))
@@ -1159,5 +1157,16 @@ impl Pipeline {
         let msg = "clear run history failed, `run` prop is empty !";
         error!("{}", msg);
         return Err(Error::convert_string(msg));
+    }
+
+    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Vec<Pipeline> {
+        let response = Pipeline::get_query_list(&pipeline, query_form).await?;
+        if response.code != 200 {
+            error!("get pipeline list error: {:#?}", response.error);
+            return Vec::new();
+        }
+
+        let list: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        return list
     }
 }

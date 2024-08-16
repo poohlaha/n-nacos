@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
+use crate::server::pipeline::index::Pipeline;
 
 /// 基本信息
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -522,8 +523,8 @@ pub struct PipelineStageTask {
     pub(crate) id: String,
     pub(crate) server_id: String,
     pub(crate) tag: PipelineTag,
-    pub(crate) stages: Vec<PipelineStage>,
-    pub(crate) props: PipelineRuntime,
+    pub(crate) runtime: PipelineRuntime,
+    pub(crate) pipeline: Pipeline,
     pub(crate) order: u32,
 }
 

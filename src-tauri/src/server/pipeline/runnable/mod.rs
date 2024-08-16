@@ -21,7 +21,6 @@ use sqlx::mysql::MySqlArguments;
 use sqlx::query::Query;
 use sqlx::{MySql, Row};
 use std::collections::HashMap;
-use std::str::ParseBoolError;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 use uuid::Uuid;
@@ -32,7 +31,17 @@ lazy_static! {
 }
 pub struct PipelineRunnable;
 
+pub struct PipelineRunnableQueryForm {
+    pub(crate) status_list: Vec<String>,
+    pub(crate) runtime_id: Option<String>
+}
+
 impl PipelineRunnable {
+    /// 获取运行历史记录
+    pub(crate) async fn get_runtime_list(query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
+        Self::get_runtime_detail(&Pipeline::default(), false, query_form).await
+    }
+
     /// 获取运行历史记录
     pub(crate) async fn get_runtime_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
         if pipeline.id.is_empty() {
@@ -43,19 +52,11 @@ impl PipelineRunnable {
             return Ok(get_error_response("查询历史记录失败, `serverId` 为空"));
         }
 
-        Self::get_runtime_detail(pipeline, false).await
+        Self::get_runtime_detail(pipeline, false, None).await
     }
 
     /// 获取运行详情
-    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline, only_one: bool) -> Result<HttpResponse, String> {
-        if pipeline.id.is_empty() {
-            return Ok(get_error_response("`pipelineId` 为空"));
-        }
-
-        if pipeline.server_id.is_empty() {
-            return Ok(get_error_response("`serverId` 为空"));
-        }
-
+    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline, only_one: bool, query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
         let mut sql = String::from("");
 
         // 取最新一条
@@ -118,11 +119,36 @@ impl PipelineRunnable {
                     LEFT JOIN pipeline_runtime_snapshot s ON r.id = s.runtime_id
                     LEFT JOIN pipeline_runtime_variable v ON s.id = v.snapshot_id
                 WHERE
-                    pipeline_id = ?
+                   1 = 1
          "#,
         );
 
-        let query = sqlx::query(&sql).bind(&pipeline.id);
+        if !pipeline.id.is_empty() {
+            sql.push_str(&format!(" AND r.pipeline_id = '{}'", pipeline.id));
+        }
+
+        if let Some(query_form) = query_form {
+            // status
+            let status_list = query_form.status_list.clone();
+            if status_list.len() > 0 {
+                let mut status_condition_sql = String::from(" AND (");
+                for (size, s) in status_list.iter().enumerate() {
+                    status_condition_sql.push_str(&format!(" r.status = '{}'", s));
+                    if size != status_list.len() - 1 {
+                        status_condition_sql.push_str(" OR ");
+                    }
+                }
+                status_condition_sql.push_str(")");
+                sql.push_str(&status_condition_sql);
+            }
+
+            // runtime_id
+            if let Some(runtime_id) = query_form.runtime_id.clone() {
+                sql.push_str(&format!(" r.id = '{}'", runtime_id));
+            }
+        }
+
+        let query = sqlx::query(&sql);
         let rows = DBHelper::execute_rows(query).await?;
         if rows.is_empty() {
             return Ok(get_success_response(None));
@@ -241,7 +267,7 @@ impl PipelineRunnable {
         return get_success_response_by_value(list);
     }
 
-    /// 添加到线程池中, 以最后一条为主
+    /// 添加到线程池中
     pub(crate) async fn exec(props: &PipelineRuntime) -> Result<HttpResponse, String> {
         if props.pipeline_id.is_empty() {
             return Ok(get_error_response("运行流水线失败, `pipelineId` 不能为空"));
@@ -257,21 +283,31 @@ impl PipelineRunnable {
 
         // 查询流水线是否存在
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let response = Pipeline::get_query_list(&pipeline, None).await?;
+        let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None).await?;
+        if pipeline_list.is_empty() {
+            return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
+        }
+
+        if pipeline_list.len() > 1 {
+            return Ok(get_error_response("运行流水线失败, 存在多条相同的流水线"));
+        }
+
+        // 查询流水线是不是在排队状态或执行状态
+        let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
+            status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
+            runtime_id: None
+        }))
+            .await?;
         if response.code != 200 {
             return Ok(response);
         }
 
-        let data: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if data.is_empty() {
-            return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
+        let runtime_list: Vec<PipelineRuntime> = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        if runtime_list.len() > 0 {
+            return Ok(get_error_response("该流水线已在运行状态, 请等待运行完成"));
         }
 
-        if data.len() > 1 {
-            return Ok(get_error_response("运行流水线失败, 该存在多条相同的流水线"));
-        }
-
-        let pipe = data.get(0).unwrap();
+        let pipe = pipeline_list.get(0).unwrap();
 
         // 查询 pipeline_runtime order
         let runtime_order_query = sqlx::query(
@@ -385,182 +421,21 @@ impl PipelineRunnable {
             return Ok(response);
         }
 
-        // 插入到线程池
-        // Self::insert_into_pool(props, &pipe).await?;
+        // 查询数据, 并插入到线程池
+        let response = Self::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
+            status_list: vec![],
+            runtime_id: Some(runtime_id.clone()),
+        })).await?;
 
-        // 更新线程池数据库
-        // let pools = POOLS.lock().unwrap();
-        // Pool::update(pools.clone())?;
+        if response.code != 200 {
+            return Ok(response);
+        }
 
-        // 更改流水线状态为 `排队中`
-        // Self::update_current_pipeline(&pipeline, props, false, Some(PipelineStatus::Queue), None, Some(props.clone()), None, Some(props.stage.clone()), Some(props.branch.clone()), false)
+        let runtime: PipelineRuntime = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let mut pip = pipe.clone();
+        pip.runtime = Some(runtime);
+        Pool::insert_into_pool(&pipe)?;
         Ok(get_success_response(None))
-    }
-
-    /// 放入线程池
-    async fn insert_into_pool(props: &PipelineRuntime, pipeline: &Pipeline) -> Result<(), String> {
-        info!("insert into pool: {:#?}", props);
-
-        /*
-        let run = pipeline.run;
-        if run.is_none() {
-            let msg = "insert into pool failed, `run` prop is empty !";
-            error!("{}", msg);
-            return Err(Error::convert_string(msg));
-        }
-
-        let run = run.unwrap();
-        let current = run.current;
-        let stages = current.stages.clone();
-        if stages.is_empty() {
-            let msg = "insert into pool failed, `stages` prop is empty !";
-            error!("{}", msg);
-            return Err(Error::convert_string(msg));
-        }
-         */
-
-        let task = PipelineStageTask {
-            id: pipeline.id.clone(),
-            server_id: pipeline.server_id.clone(),
-            tag: pipeline.basic.tag.clone(),
-            // stages: stages.clone(),
-            stages: Vec::new(),
-            props: props.clone(),
-            // order: current.order,
-            order: 1,
-        };
-        info!("pool task: {:#?}", task);
-
-        // 放入线程池中, 覆盖重复数据
-        let mut pools = POOLS.lock().unwrap();
-        let mut has_found = false;
-        for item in pools.iter_mut() {
-            if &item.id == &task.id && &item.server_id == &task.server_id {
-                *item = task.clone(); // 存在则替换
-                has_found = true;
-            }
-        }
-
-        if !has_found {
-            info!("task not found in pool, it will be added !");
-            pools.push(task)
-        } else {
-            info!("task has found in pool, it will be replaced !");
-        }
-
-        info!("pools task list: {:#?}", pools);
-        info!("insert into success !");
-        Ok(())
-    }
-
-    /// 保存当前流水线
-    pub(crate) fn update_current_pipeline(
-        pipeline: &Pipeline,
-        props: &PipelineRuntime,
-        update_order: bool,
-        status: Option<PipelineStatus>,
-        start_time: Option<String>,
-        runnable: Option<PipelineRuntimeSnapshot>,
-        duration: Option<u32>,
-        stage: PipelineRuntimeStage,
-        branch: Option<String>,
-        insert_current_into_history: bool,
-    ) -> Result<HttpResponse, String> {
-        Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"))
-        /*
-        let data = Pipeline::get_pipeline_list(&pipeline);
-        return match data {
-            Ok(data) => {
-                if data.is_empty() {
-                    return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
-                }
-
-                let pipe = data.iter().find(|s| &s.id == &props.id);
-                if let Some(pipe) = pipe {
-                    let mut pipe = pipe.clone();
-
-                    if let Some(start_time) = start_time.clone() {
-                        pipe.last_run_time = Some(start_time); // 最后运行时间
-                    }
-
-                    // status
-                    if let Some(status) = status.clone() {
-                        pipe.status = status;
-                    }
-
-                    let run = pipe.run.clone();
-                    if let Some(mut run) = run {
-                        let mut current = run.current.clone();
-
-                        // order
-                        if update_order {
-                            current.order = current.order + 1;
-                        }
-
-                        // start_time
-                        if let Some(start_time) = start_time {
-                            current.start_time = start_time;
-                        }
-
-                        // runnable
-                        if let Some(runnable) = runnable {
-                            current.runnable = runnable;
-                        }
-
-                        // duration
-                        if let Some(duration) = duration {
-                            current.duration = duration;
-                        }
-
-                        // stage
-                        if let Some(stage) = stage {
-                            current.stage = stage;
-                        }
-
-                        // status
-                        if let Some(status) = status {
-                            current.stage.status = Some(status.clone());
-                        }
-
-                        // branch
-                        if let Some(branch) = branch {
-                            run.branch = branch;
-                        }
-
-                        // history
-                        if insert_current_into_history {
-                            let history = pipe.clone();
-                            if let Some(mut run) = pipeline.run.clone() {
-                                run.history_list = Vec::new()
-                            }
-                            run.history_list.push(history);
-                        }
-
-                        run.current = current;
-                        pipe.run = Some(run);
-                    }
-
-                    // 更新流水线
-                    let res = Pipeline::update_pipeline(data, &pipe)?;
-                    if res.code != 200 {
-                        return Ok(res.clone());
-                    }
-
-                    let success: bool = serde_json::from_value(res.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-                    if !success {
-                        return Ok(get_error_response("运行流水线失败 !"));
-                    }
-
-                    // 成功后直接返回流水线数据
-                    let data = serde_json::to_value(&pipe).map_err(|err| Error::Error(err.to_string()).to_string())?;
-                    return Ok(get_success_response(Some(data)));
-                }
-
-                Ok(get_error_response("根据 ID 查找流水线失败, 该流水线不存在"))
-            }
-            Err(_) => Ok(get_error_response("运行流水线失败, 该流水线不存在")),
-        };
-         */
     }
 }
 
@@ -607,14 +482,14 @@ impl PipelineRunnable {
     }
 
     /// 结束
-    pub(crate) fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage: PipelineRuntimeStage, success: bool, msg: &str, order: u32, status: Option<PipelineStatus>) -> Option<Pipeline> {
+    pub(crate) async fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, runtime: &PipelineRuntime, success: bool, msg: &str) -> Option<HttpResponse> {
         let err = if success { "成功" } else { "失败" };
 
+        let order = runtime.order.unwrap_or(1);
         let msg = format!("{} {} !", msg, err);
         Self::save_log(app, &msg, &pipeline.server_id, &pipeline.id, order);
 
-        // 更新流水线
-        let result = Self::update_stage(pipeline, props, stage, status);
+        let result = Self::update(runtime, pipeline).await;
         return match result {
             Ok(res) => {
                 EventEmitter::log_step_res(app, Some(get_success_response_by_value(res.clone()).unwrap()));
@@ -628,16 +503,34 @@ impl PipelineRunnable {
         };
     }
 
-    /// 更新 stage 状态
-    pub(crate) fn update_stage(pipeline: &Pipeline, props: &PipelineRuntime, stage: PipelineRuntimeStage, status: Option<PipelineStatus>) -> Result<Pipeline, String> {
-        if status.is_none() {
-            return Ok(pipeline.clone());
-        }
+    /// 更新数据库
+    async fn update_stage(pipeline: &Pipeline, runtime: &PipelineRuntime) -> Result<HttpResponse, String> {
+        // 1. 更新 pipeline 表中的 status
+        // 2. 更新 pipeline_runtime 表中的 status
+        // 3. 修改 pipeline_runtime 中的 stage_index, group_index, step_index, finished
+        let mut query_list = Vec::new();
+        let pipeline_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE pipeline SET `status` = ? WHERE id = ?
+        "#,
+        )
+            .bind(PipelineStatus::got(runtime.status.clone()))
+            .bind(&pipeline.id);
+        query_list.push(pipeline_query);
 
-        let res = PipelineRunnable::update_current_pipeline(&pipeline, props, false, status, None, None, None, stage, None, false)?;
-
-        let pipe: Pipeline = serde_json::from_value(res.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        Ok(pipe)
+        let runtime_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE pipeline SET `status` = ?, stage_index = ?, group_index = ?, step_index = ?, finished = ? WHERE id = ?
+        "#,
+        )
+            .bind(PipelineStatus::got(runtime.status.clone()))
+            .bind(format!("{}", runtime.stage.stage_index))
+            .bind(format!("{}", runtime.stage.group_index))
+            .bind(format!("{}", runtime.stage.step_index))
+            .bind(format!("{}", runtime.stage.finished))
+            .bind(&runtime.id);
+        query_list.push(runtime_query);
+        DBHelper::batch_commit(query_list).await
     }
 
     /// 保存日志, 发送消息到前端
