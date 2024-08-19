@@ -33,7 +33,7 @@ pub struct PipelineRunnable;
 
 pub struct PipelineRunnableQueryForm {
     pub(crate) status_list: Vec<String>,
-    pub(crate) runtime_id: Option<String>
+    pub(crate) runtime_id: Option<String>,
 }
 
 impl PipelineRunnable {
@@ -295,9 +295,9 @@ impl PipelineRunnable {
         // 查询流水线是不是在排队状态或执行状态
         let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
-            runtime_id: None
+            runtime_id: None,
         }))
-            .await?;
+        .await?;
         if response.code != 200 {
             return Ok(response);
         }
@@ -422,10 +422,15 @@ impl PipelineRunnable {
         }
 
         // 查询数据, 并插入到线程池
-        let response = Self::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
-            status_list: vec![],
-            runtime_id: Some(runtime_id.clone()),
-        })).await?;
+        let response = Self::get_runtime_detail(
+            &pipeline,
+            true,
+            Some(PipelineRunnableQueryForm {
+                status_list: vec![],
+                runtime_id: Some(runtime_id.clone()),
+            }),
+        )
+        .await?;
 
         if response.code != 200 {
             return Ok(response);
@@ -482,18 +487,19 @@ impl PipelineRunnable {
     }
 
     /// 结束
-    pub(crate) async fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, runtime: &PipelineRuntime, success: bool, msg: &str) -> Option<HttpResponse> {
+    pub(crate) async fn exec_end_log(app: &AppHandle, pipeline: &Pipeline, success: bool, msg: &str) -> Option<Pipeline> {
         let err = if success { "成功" } else { "失败" };
 
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
         let order = runtime.order.unwrap_or(1);
         let msg = format!("{} {} !", msg, err);
         Self::save_log(app, &msg, &pipeline.server_id, &pipeline.id, order);
 
-        let result = Self::update(runtime, pipeline).await;
+        let result = Self::update_stage(pipeline, runtime).await;
         return match result {
-            Ok(res) => {
-                EventEmitter::log_step_res(app, Some(get_success_response_by_value(res.clone()).unwrap()));
-                Some(res.clone())
+            Ok(_) => {
+                EventEmitter::log_step_res(app, Some(get_success_response_by_value(pipeline.clone()).unwrap()));
+                Some(pipeline.clone())
             }
             Err(err) => {
                 Self::save_log(app, &err, &pipeline.server_id, &pipeline.id, order);
@@ -504,7 +510,7 @@ impl PipelineRunnable {
     }
 
     /// 更新数据库
-    async fn update_stage(pipeline: &Pipeline, runtime: &PipelineRuntime) -> Result<HttpResponse, String> {
+    pub(crate) async fn update_stage(pipeline: &Pipeline, runtime: &PipelineRuntime) -> Result<HttpResponse, String> {
         // 1. 更新 pipeline 表中的 status
         // 2. 更新 pipeline_runtime 表中的 status
         // 3. 修改 pipeline_runtime 中的 stage_index, group_index, step_index, finished
@@ -514,15 +520,22 @@ impl PipelineRunnable {
             UPDATE pipeline SET `status` = ? WHERE id = ?
         "#,
         )
-            .bind(PipelineStatus::got(runtime.status.clone()))
-            .bind(&pipeline.id);
+        .bind(PipelineStatus::got(runtime.status.clone()))
+        .bind(&pipeline.id);
         query_list.push(pipeline_query);
 
-        let runtime_query = sqlx::query::<MySql>(
+        let mut runtime_sql = String::from(
             r#"
-            UPDATE pipeline SET `status` = ?, stage_index = ?, group_index = ?, step_index = ?, finished = ? WHERE id = ?
+            UPDATE pipeline
+            SET `status` = ?, stage_index = ?, group_index = ?, step_index = ?, finished = ?
         "#,
-        )
+        );
+
+        if let Some(duration) = &runtime.duration {
+            runtime_sql.push_str(&format!(", duration = '{}'", duration));
+        }
+
+        let runtime_query = sqlx::query::<MySql>(&runtime_sql)
             .bind(PipelineStatus::got(runtime.status.clone()))
             .bind(format!("{}", runtime.stage.stage_index))
             .bind(format!("{}", runtime.stage.group_index))

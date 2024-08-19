@@ -26,9 +26,16 @@ const DIR_NAME: &str = "projects";
 
 pub struct PipelineRunnableStage;
 
+#[derive(Default, Debug)]
+pub struct PipelineRunnableResult {
+    success: bool,
+    msg: String,
+    pipeline: Option<Pipeline>,
+}
+
 impl PipelineRunnableStage {
     /// 执行 stage
-    pub(crate) async fn exec(app: &AppHandle, task: &PipelineStageTask, installed_commands: &Vec<String>) {
+    pub(crate) async fn exec(app: &AppHandle, task: &PipelineStageTask, installed_commands: &Vec<String>) -> Pipeline {
         let runtime = &task.runtime;
         let pipeline = &task.pipeline;
         let stages = &runtime.stages;
@@ -62,30 +69,41 @@ impl PipelineRunnableStage {
             let mut runtime = task.runtime.clone();
             runtime.status = PipelineStatus::Failed;
             runtime.stage.stage_index = 1;
-            PipelineRunnable::exec_end_log(app, &pipeline, &task.runtime, false, "exec stages failed, `stages` prop is empty !").await;
-            return;
+            let mut pipe = pipeline.clone();
+            pipe.runtime = Some(runtime);
+            pipe.status = Some(PipelineStatus::Failed);
+            PipelineRunnable::exec_end_log(app, &pipeline, false, "exec stages failed, `stages` prop is empty !").await;
+            return pipe;
         }
 
         info!("exec list: {:#?}", list);
 
         // 执行所有的 step
-        Self::exec_steps(app, &task, list, installed_commands).await;
+        return Self::exec_steps(app, &task, list, installed_commands).await;
     }
 
     /// 执行所有的 step
-    async fn exec_steps(app: &AppHandle, task: &PipelineStageTask, steps: Vec<PipelineRunnableStageStep>, installed_commands: &Vec<String>) {
+    async fn exec_steps(app: &AppHandle, task: &PipelineStageTask, steps: Vec<PipelineRunnableStageStep>, installed_commands: &Vec<String>) -> Pipeline {
         info!("installed_commands: {:#?}", installed_commands);
 
         let mut pipe = task.pipeline.clone();
+        let runtime = pipe.runtime.clone();
         let mut has_error: bool = false;
         let mut error_step: Option<PipelineRunnableStageStep> = None;
         for step in steps.iter() {
-            // let result = Self::exec_step(app, &pipe, &task.props, step, installed_commands.clone(), order);
-            let result = Self::exec_step(app, &pipe, &task.runtime, step, installed_commands.clone()).await;
+            // 设置运行步骤
+            let mut run = runtime.clone();
+            if let Some(mut run) = run {
+                run.stage.stage_index = step.stage_index;
+                run.stage.group_index = step.group_index;
+                run.stage.step_index = step.step_index;
+                pipe.runtime = Some(run);
+            }
 
+            let result = Self::exec_step(app, &pipe, step, installed_commands.clone()).await;
             match result {
-                Ok((success, pipeline)) => {
-                    if !success || pipeline.is_none() {
+                Ok(result) => {
+                    if !result.success || result.pipeline.is_none() {
                         has_error = true;
                         error_step = Some(step.clone());
                         error!("exec step failed !");
@@ -94,7 +112,7 @@ impl PipelineRunnableStage {
 
                     has_error = false;
                     info!("exec step success !");
-                    if let Some(pipeline) = pipeline {
+                    if let Some(pipeline) = result.pipeline {
                         pipe = pipeline;
                     }
                 }
@@ -103,7 +121,7 @@ impl PipelineRunnableStage {
                     error_step = Some(step.clone());
                     let msg = format!("exec step error: {}", &err);
                     error!("{}", &msg);
-                    // PipelineRunnable::exec_end_log(app, &pipeline, &task.props, error_stage.clone(), false, &msg, order, Some(PipelineStatus::Failed));
+                    PipelineRunnable::exec_end_log(app, &pipe, false, &msg).await;
                     break;
                 }
             }
@@ -112,89 +130,79 @@ impl PipelineRunnableStage {
         // 插入日志
         info!("insert result to log ...");
         let last_step = steps.get(steps.len() - 1);
-        let mut success_stage = PipelineRuntimeStage::default();
-        // success_stage.status = if has_error { Some(PipelineStatus::Failed) } else { Some(PipelineStatus::Success) };
+
+        let mut runtime = pipe.runtime.unwrap_or(PipelineRuntime::default());
+        runtime.status = if has_error { PipelineStatus::Failed } else { PipelineStatus::Success };
 
         info!("error_step: {:#?}", error_step);
         if let Some(error_step) = error_step {
-            success_stage.stage_index = error_step.stage_index;
-            success_stage.group_index = error_step.group_index;
-            success_stage.step_index = error_step.step_index;
-            // success_stage.finish_group_count = error_step.group_index;
+            runtime.stage.stage_index = error_step.stage_index;
+            runtime.stage.group_index = error_step.group_index;
+            runtime.stage.step_index = error_step.step_index;
+            pipe.status = Some(PipelineStatus::Failed)
+            // runtime.stage.finish_group_count = error_step.group_index
         } else {
             if let Some(last_step) = last_step {
-                success_stage.stage_index = last_step.stage_index;
-                success_stage.group_index = last_step.group_index;
-                success_stage.step_index = last_step.step_index;
-                // success_stage.finish_group_count = last_step.group_index;
-                success_stage.finished = true;
+                runtime.stage.stage_index = last_step.stage_index;
+                runtime.stage.group_index = last_step.group_index;
+                runtime.stage.step_index = last_step.step_index;
+                runtime.stage.finished = true;
+                pipe.status = Some(PipelineStatus::Success)
+                // runtime.stage.finish_group_count = last_step.group_index
             }
         }
 
-        info!("success_stage: {:#?}", success_stage);
-        let update_result: Result<HttpResponse, String> = PipelineRunnable::update_current_pipeline(&pipe, &task.props, false, None, None, None, None, success_stage, None, true);
-        match update_result {
-            Ok(res) => {
-                info!("insert in to history list success !");
-                EventEmitter::log_step_res(app, Some(res.clone()));
-            }
-            Err(err) => {
-                info!("insert in to history list error: {} !", &err);
-            }
-        }
+        info!("success runtime: {:#?}", runtime);
+        pipe.runtime = Some(runtime);
+        PipelineRunnable::exec_end_log(app, &pipe, true, "success !").await;
+        return pipe.clone();
     }
 
     /// 执行步骤
-    async fn exec_step(app: &AppHandle, pipeline: &Pipeline, runtime: &PipelineRuntime, stage: &PipelineRunnableStageStep, installed_commands: Vec<String>) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step(app: &AppHandle, pipeline: &Pipeline, stage: &PipelineRunnableStageStep, installed_commands: Vec<String>) -> Result<PipelineRunnableResult, String> {
         let status = stage.step.module.clone();
-
-        let mut run = runtime.clone();
-        run.stage.stage_index = stage.stage_index;
-        run.stage.group_index = stage.group_index;
-        run.stage.step_index = stage.step_index;
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
 
         // 更新 step, 通知前端
-        PipelineRunnable::update_stage(pipeline, &run).await?;
-
-        let mut pipe = pipeline.clone();
-        pipe.runtime = Some(run.clone());
+        PipelineRunnable::update_stage(pipeline, &runtime).await?;
         EventEmitter::log_step_res(app, Some(get_success_response_by_value(pipeline.clone()).unwrap()));
 
         return match status {
-            PipelineCommandStatus::None => Ok((false, None)),
+            PipelineCommandStatus::None => Ok(PipelineRunnableResult::default()),
             PipelineCommandStatus::GitPull => Self::exec_step_git_pull(app, &pipeline, stage).await,
-            PipelineCommandStatus::H5Install => Self::exec_step_h5_install(app, &pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Pack => Self::exec_step_pack(app, &pipeline, props, installed_commands.clone(), stage, &run_stage, order),
-            PipelineCommandStatus::Minimize => Self::exec_step_minimize(app, &pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, props, stage, &run_stage, order),
-            PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, props, stage, &run_stage, order),
+            PipelineCommandStatus::H5Install => Self::exec_step_h5_install(app, &pipeline, stage).await,
+            PipelineCommandStatus::Pack => Self::exec_step_pack(app, &pipeline, installed_commands.clone(), stage).await,
+            PipelineCommandStatus::Minimize => Self::exec_step_minimize(app, &pipeline, stage).await,
+            PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, stage).await,
+            PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, stage).await,
+            PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, stage).await,
         };
     }
 
     /// 代码拉取
-    async fn exec_step_git_pull(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_git_pull(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = format!("【{}】", step.label);
         let basic = &pipeline.basic;
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, runtime.order.unwrap_or(1));
 
         // 非远程项目, 直接成功
         if !GitHandler::is_remote_url(&basic.path) {
             let mut pipe = pipeline.clone();
-            let runtime = pipeline.runtime.clone();
-            if let Some(mut runtime) = runtime {
-                runtime.status = PipelineStatus::Success;
-                pipe.runtime = Some(runtime.clone());
-                PipelineRunnable::exec_end_log(app, pipeline, &runtime,true, &format!("{} not a remote project, pull {} ", &pack_name, &basic.path)).await;
-            }
-            return Ok((true, Some(pipe.clone())));
+            let msg = format!("{} not a remote project, pull {} ", &pack_name, &basic.path);
+            let mut runtime = runtime.clone();
+            runtime.status = PipelineStatus::Success;
+            pipe.runtime = Some(runtime.clone());
+            let pipe = PipelineRunnable::exec_end_log(app, &pipe, true, &msg).await;
+
+            return Ok(PipelineRunnableResult { success: pipe.is_some(), msg, pipeline: pipe });
         }
 
         let dir = Self::get_project_path(&pipeline.server_id, &pipeline.id)?;
-
         let config = GitConfig {
             url: basic.path.clone(),
-            // branch: props.branch.clone(),
             branch: String::new(),
             dir: dir.to_string_lossy().to_string(),
         };
@@ -205,30 +213,38 @@ impl PipelineRunnableStage {
         // 代码拉取
         let app_cloned = Arc::new(app.clone());
         let success = GitHandler::pull(&config, move |msg| {
-            PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+            PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, runtime.order.unwrap_or(1));
         })?;
 
-        // result stage
-        let mut result_stage = stage.clone();
-        // result_stage.status = if success { Some(PipelineStatus::Success) } else { Some(PipelineStatus::Failed) };
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = if success { PipelineStatus::Success } else { PipelineStatus::Failed };
+        pipe.runtime = Some(runtime);
 
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), success, &format!("{} pull {} ", &pack_name, &basic.path), order, None);
+        let msg = format!("{} pull {} ", &pack_name, &basic.path);
+        let pipe = PipelineRunnable::exec_end_log(app, &pipe, success, &msg).await;
+
+        let error_result = PipelineRunnableResult { success, msg: String::new(), pipeline: None };
+
         if pipe.is_none() {
-            return Ok((false, None));
+            return Ok(error_result);
         }
 
         if success {
-            return Ok((true, pipe));
+            return Ok(PipelineRunnableResult { success: true, msg, pipeline: pipe });
         }
 
-        return Ok((false, None));
+        return Ok(error_result);
     }
 
     /// H5 依赖安装
-    fn exec_step_h5_install(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_h5_install(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = format!("【{}】", step.label);
         let basic = &pipeline.basic;
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, runtime.order.unwrap_or(1));
 
         let url = &basic.path;
         let project_name = GitHandler::get_project_name_by_git(&url);
@@ -238,59 +254,48 @@ impl PipelineRunnableStage {
             // 远程项目
             let dir = Self::get_project_path(&pipeline.server_id, &pipeline.id)?;
 
-            // error stage
-            let mut error_stage = stage.clone();
-            // error_stage.status = Some(PipelineStatus::Failed);
-
             project_dir = dir.join(&project_name);
             if !project_dir.exists() {
-                PipelineRunnable::exec_end_log(
-                    app,
-                    &pipeline,
-                    &props,
-                    error_stage.clone(),
-                    false,
-                    &format!("project dir: {:#?} not exists, {} ", project_dir, &pack_name),
-                    order,
-                    Some(PipelineStatus::Failed),
-                );
-                return Ok((false, None));
+                let msg = format!("project dir: {:#?} not exists, {} ", project_dir, &pack_name);
+                let mut pipe = pipeline.clone();
+                let mut runtime = runtime.clone();
+                runtime.status = PipelineStatus::Failed;
+                pipe.runtime = Some(runtime.clone());
+
+                PipelineRunnable::exec_end_log(app, &pipe, false, &msg).await;
+                return Ok(PipelineRunnableResult { success: false, msg, pipeline: None });
             }
         } else {
             project_dir = PathBuf::from(url);
         }
 
-        return Self::install_h5_project(app, pipeline, props, project_dir, &project_name, order, &pack_name, stage);
+        let order = runtime.order.unwrap_or(1);
+        return Self::install_h5_project(app, pipeline, &runtime, project_dir, &project_name, order, &pack_name, &runtime.stage).await;
     }
 
     /// 项目打包
-    fn exec_step_pack(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, installed_commands: Vec<String>, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_pack(app: &AppHandle, pipeline: &Pipeline, installed_commands: Vec<String>, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
-
         let pack_name = format!("【H5 {}】", step.label);
-        let tag = props.tag.clone();
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, runtime.order.unwrap_or(1));
+
+        let tag = runtime.tag.clone();
         let basic = &pipeline.basic;
         let project_name = GitHandler::get_project_name_by_git(&basic.path);
-
-        // error stage
-        let mut error_stage = stage.clone();
-        // error_stage.status = Some(PipelineStatus::Failed);
 
         // 取 packDir
         let dir = match Self::get_project_pack_dir(stage_step, pipeline, &project_name) {
             Ok(dir) => dir,
             Err(err) => {
-                PipelineRunnable::exec_end_log(
-                    app,
-                    &pipeline,
-                    &props,
-                    error_stage.clone(),
-                    false,
-                    &format!("exec step pack {} failed, {}, {}", project_name, err, pack_name),
-                    order,
-                    Some(PipelineStatus::Failed),
-                );
-                return Ok((false, None));
+                let msg = format!("exec step pack {} failed, {}, {}", project_name, err, pack_name);
+                let mut pipe = pipeline.clone();
+                let mut runtime = runtime.clone();
+                runtime.status = PipelineStatus::Failed;
+                pipe.runtime = Some(runtime.clone());
+
+                PipelineRunnable::exec_end_log(app, &pipe, false, &msg).await;
+                return Ok(PipelineRunnableResult { success: false, msg, pipeline: None });
             }
         };
 
@@ -303,17 +308,25 @@ impl PipelineRunnableStage {
             PipelineTag::Java => {}
             PipelineTag::Android => {}
             PipelineTag::Ios => {}
-            PipelineTag::H5 => return Self::exec_step_h5_pack(app, &pipeline, props, installed_commands.clone(), &dir, step, stage, order),
+            PipelineTag::H5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step),
         }
 
-        Ok((true, None))
+        Ok(PipelineRunnableResult::default())
     }
 
     /// 文件压缩
-    fn exec_step_minimize(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_minimize(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let order = runtime.order.unwrap_or(1);
+
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
+
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = PipelineStatus::Failed;
+        pipe.runtime = Some(runtime.clone());
 
         let mut args = minimize::minify::Args::default();
         let components = &stage_step.step.components;
@@ -392,28 +405,34 @@ impl PipelineRunnableStage {
                 });
 
                 if !success {
-                    let mut result_stage = stage.clone();
-                    // result_stage.status = Some(PipelineStatus::Failed);
-                    PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), false, "minimize failed !", order, Some(PipelineStatus::Failed));
-                    return Ok((false, None));
+                    let error_msg = String::from("minimize failed !");
+                    PipelineRunnable::exec_end_log(app, &pipe, false, &error_msg).await;
+                    return Ok(PipelineRunnableResult {
+                        success: false,
+                        msg: error_msg,
+                        pipeline: None,
+                    });
                 }
             }
 
             PipelineRunnable::save_log(app, "skip minimize step ...", &pipeline.server_id, &pipeline.id, order);
         }
 
-        // result stage
-        let mut result_stage = stage.clone();
-        // result_stage.status = Some(PipelineStatus::Success);
-
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), true, &format!("{}", pack_name), order, None);
-        return Ok((true, pipe));
+        runtime.status = PipelineStatus::Success;
+        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, true, &format!("{}", pack_name)).await;
+        return Ok(PipelineRunnableResult {
+            success: pipe.is_some(),
+            msg: "".to_string(),
+            pipeline: pipe,
+        });
     }
 
     /// 图片压缩
-    fn exec_step_compress(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_compress(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let order = runtime.order.unwrap_or(1);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
 
         /*
@@ -557,23 +576,32 @@ impl PipelineRunnableStage {
         }
          */
 
-        // result stage
-        let mut result_stage = stage.clone();
-        // result_stage.status = Some(PipelineStatus::Success);
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = PipelineStatus::Success;
+        pipe.runtime = Some(runtime.clone());
 
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), true, &format!("{}", pack_name), order, None);
-        return Ok((true, pipe));
+        let pipe = PipelineRunnable::exec_end_log(app, &pipe, true, &format!("{}", pack_name)).await;
+        return Ok(PipelineRunnableResult {
+            success: pipe.is_some(),
+            msg: "".to_string(),
+            pipeline: pipe,
+        });
     }
 
     /// 项目部署
-    fn exec_step_deploy(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_deploy(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let order = runtime.order.unwrap_or(1);
+        let snapshot = &runtime.snapshot;
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
 
-        // error stage
-        let mut error_stage = stage.clone();
-        // error_stage.status = Some(PipelineStatus::Failed);
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = PipelineStatus::Success;
+        pipe.runtime = Some(runtime.clone());
 
         let mut server = Server::default();
         server.id = pipeline.server_id.clone();
@@ -592,15 +620,13 @@ impl PipelineRunnableStage {
             }
 
             // 没有找到去 selected_variables 中查找
-            /*
             if deploy_dir.is_empty() {
-                let dir = Self::get_value_from_variables(&props.variables, "deployDir");
+                let dir = Self::get_value_from_variables(&snapshot.runnable_variables, "deployDir");
                 if !dir.is_empty() {
-                    info!("exec step deploy found deploy_dir in selected variables: {}", deploy_dir);
+                    info!("exec step deploy found deploy_dir in runnable variables: {}", deploy_dir);
                     deploy_dir = dir;
                 }
             }
-             */
 
             // 都未找到, 直接设置默认值
             if deploy_dir.is_empty() {
@@ -615,7 +641,6 @@ impl PipelineRunnableStage {
 
         // 判断 deploy_dir 是不是绝对路径
         let build_dir = Self::get_deploy_dir(pipeline, &deploy_dir, stage_step, &pack_name)?;
-        /*
         let response = Server::get_by_id(&Server {
             id: pipeline.server_id.clone(),
             ..Default::default()
@@ -625,22 +650,7 @@ impl PipelineRunnableStage {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
 
-
         let se = convert_res::<Server>(response);
-         */
-
-        let se = Some(Server {
-            id: "".to_string(),
-            ip: "".to_string(),
-            port: 0,
-            account: "".to_string(),
-            pwd: "".to_string(),
-            name: "".to_string(),
-            description: "".to_string(),
-            create_time: None,
-            update_time: None,
-        });
-
         if se.is_none() {
             return Err(Error::convert_string(&format!("find server by id: {} failed !", &server.id)));
         }
@@ -678,42 +688,43 @@ impl PipelineRunnableStage {
             Ok(result) => {
                 info!("sftp deploy result: {:#?}", result);
 
-                // result stage
-                let mut result_stage = stage.clone();
-                // result_stage.status = Some(PipelineStatus::Success);
-
-                let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), true, &format!("{}", pack_name), order, None);
-                Ok((true, pipe))
+                runtime.status = PipelineStatus::Success;
+                let msg = format!("{}", pack_name);
+                let pipe = PipelineRunnable::exec_end_log(app, &pipe, true, &msg).await;
+                Ok(PipelineRunnableResult { success: pipe.is_some(), msg, pipeline: pipe })
             }
             Err(err) => {
-                // result stage
-                let mut result_stage = stage.clone();
-                // result_stage.status = Some(PipelineStatus::Failed);
+                runtime.status = PipelineStatus::Failed;
 
-                PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), false, &format!("deploy error: {}, {}", err, pack_name), order, Some(PipelineStatus::Failed));
-                Ok((false, None))
+                let msg = format!("deploy error: {}, {}", err, pack_name);
+                PipelineRunnable::exec_end_log(app, &pipe, false, &msg).await;
+                Ok(PipelineRunnableResult { success: false, msg, pipeline: None })
             }
         };
     }
 
     /// 发送通知
-    fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, stage_step: &PipelineRunnableStageStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let order = runtime.order.unwrap_or(1);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
 
-        // 更新 Stage
-        let pipeline = PipelineRunnable::update_stage(pipeline, props, stage.clone(), None)?;
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = PipelineStatus::Success;
+        pipe.runtime = Some(runtime.clone());
 
-        // result stage
-        let mut result_stage = stage.clone();
-        // result_stage.status = Some(PipelineStatus::Success);
-
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), true, &format!("{}", pack_name), order, None);
+        let msg = format!("{}", pack_name);
+        let pipe = PipelineRunnable::exec_end_log(app, &pipe, true, &msg).await;
+        if pipe.is_none() {
+            return Ok(PipelineRunnableResult { success: false, msg, pipeline: None });
+        }
 
         // 向前端发送通知, 通知弹框
         EventEmitter::log_step_notice(app, Some(get_success_response_by_value(pipe.clone()).unwrap_or(get_error_response("exec step notice error !"))));
-        return Ok((true, pipe));
+        return Ok(PipelineRunnableResult { success: true, msg, pipeline: pipe });
     }
 
     /// 获取目录
@@ -727,48 +738,42 @@ impl PipelineRunnableStage {
     }
 
     /// 执行 H5 打包
-    fn exec_step_h5_pack(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, installed_commands: Vec<String>, dir: &str, step: &PipelineStep, stage: &PipelineRuntimeStage, order: u32) -> Result<(bool, Option<Pipeline>), String> {
+    async fn exec_step_h5_pack(app: &AppHandle, pipeline: &Pipeline, installed_commands: Vec<String>, dir: &str, step: &PipelineStep) -> Result<PipelineRunnableResult, String> {
         let pack_name = &format!("【H5 {}】", &step.label);
-        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
 
-        /*
-        let make = props.make.clone();
-        let command = props.command.clone();
-        let script = props.script.clone();
-         */
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, runtime.order.unwrap_or(1));
 
-        // error stage
-        let mut error_stage = stage.clone();
-        // error_stage.status = Some(PipelineStatus::Failed);
+        let snapshot = &runtime.snapshot;
+        let order = runtime.order.unwrap_or(1);
+        let make = snapshot.make.clone();
+        let command = snapshot.command.clone();
+        let script = snapshot.script.clone();
 
-        let get_result_stage = |success: bool| {
-            // result stage
-            let mut result_stage = stage.clone();
-            // result_stage.status = if success { Some(PipelineStatus::Success) } else { Some(PipelineStatus::Failed) };
+        let mut error_msg = String::new();
+        let mut pipe = pipeline.clone();
+        let mut runtime = runtime.clone();
+        runtime.status = PipelineStatus::Failed;
+        pipe.runtime = Some(runtime.clone());
 
-            return result_stage;
+        let mut error_result = PipelineRunnableResult {
+            success: false,
+            msg: error_msg.to_string(),
+            pipeline: None,
         };
 
         // make
-        /*
         if let Some(make) = make {
             if !make.is_empty() {
                 PipelineRunnable::save_log(app, "use `make` command", &pipeline.server_id, &pipeline.id, order);
 
+                error_msg = format!("os not install `make` command, {}", pack_name);
                 // 检查 make 命令是否存在
                 let found = installed_commands.iter().find(|str| str.as_str() == "make");
                 if found.is_none() {
-                    PipelineRunnable::exec_end_log(
-                        app,
-                        &pipeline,
-                        &props,
-                        error_stage.clone(),
-                        false,
-                        &format!("os not install `make` command, {}", pack_name),
-                        order,
-                        Some(PipelineStatus::Failed),
-                    );
-                    return Ok((false, None));
+                    error_result.msg = error_msg.clone();
+                    PipelineRunnable::exec_end_log(app, &pipe, false, &error_msg).await;
+                    return Ok(error_result);
                 }
 
                 // 执行 make 命令
@@ -779,61 +784,43 @@ impl PipelineRunnableStage {
                     PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
                 });
 
-                let mut status: Option<PipelineStatus> = None;
-                if !success {
-                    status = Some(PipelineStatus::Failed)
-                }
+                runtime.status = if success { PipelineStatus::Success } else { PipelineStatus::Failed };
 
-                let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(get_result_stage(success)), success, &format!("{}", pack_name), order, status);
+                error_msg = format!("{}", pack_name);
+                let pipe = PipelineRunnable::exec_end_log(app, &pipe, success, &format!("{}", pack_name)).await;
                 if pipe.is_none() {
-                    return Ok((false, None));
+                    return Ok(error_result);
                 }
 
                 if success {
-                    return Ok((true, pipe));
+                    return Ok(PipelineRunnableResult {
+                        success,
+                        msg: error_msg.to_string(),
+                        pipeline: pipe,
+                    });
                 }
 
-                return Ok((false, None));
+                return Ok(error_result);
             }
         }
 
-         */
-
         // command
-        /*
         if command.is_none() || script.is_none() {
-            PipelineRunnable::exec_end_log(
-                app,
-                &pipeline,
-                &props,
-                error_stage.clone(),
-                false,
-                &format!("`command` or `script` is empty , {}", pack_name),
-                order,
-                Some(PipelineStatus::Failed),
-            );
-            return Ok((false, None));
+            error_msg = format!("`command` or `script` is empty , {}", pack_name);
+            error_result.msg = error_msg.clone();
+            PipelineRunnable::exec_end_log(app, &pipe, false, &error_msg).await;
+            return Ok(error_result);
         }
 
-         */
-
         // command
-        /*
         let command = command.unwrap();
         let script = script.unwrap();
 
         if command.is_empty() || script.is_empty() {
-            PipelineRunnable::exec_end_log(
-                app,
-                &pipeline,
-                &props,
-                error_stage.clone(),
-                false,
-                &format!("`command` or `script` is empty , {}", pack_name),
-                order,
-                Some(PipelineStatus::Failed),
-            );
-            return Ok((false, None));
+            error_msg = format!("`command` or `script` is empty , {}", pack_name);
+            error_result.msg = error_msg.clone();
+            PipelineRunnable::exec_end_log(app, &pipe, false, &error_msg).await;
+            return Ok(error_result);
         }
 
         let mut run_command = String::new();
@@ -845,17 +832,10 @@ impl PipelineRunnableStage {
         // 检查命令是否存在
         let found = installed_commands.iter().find(|str| str.as_str() == command.as_str());
         if found.is_none() {
-            PipelineRunnable::exec_end_log(
-                app,
-                &pipeline,
-                &props,
-                error_stage.clone(),
-                false,
-                &format!("os not install `{}` command, {}", command, pack_name),
-                order,
-                Some(PipelineStatus::Failed),
-            );
-            return Ok((false, None));
+            error_msg = format!("os not install `{}` command, {}", command, pack_name);
+            error_result.msg = error_msg.clone();
+            PipelineRunnable::exec_end_log(app, &pipe, false, &error_msg).await;
+            return Ok(error_result);
         }
 
         // 执行 run command 命令
@@ -871,21 +851,22 @@ impl PipelineRunnableStage {
             status = Some(PipelineStatus::Failed)
         }
 
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, Some(get_result_stage(success)), success, &format!("{}", pack_name), order, status);
+        runtime.status = status;
+        let msg = format!("{}", pack_name);
+        let pipe = PipelineRunnable::exec_end_log(app, &pipe, success, &msg).await;
         if pipe.is_none() {
-            return Ok((false, None));
+            return Ok(error_result);
         }
 
         if success {
-            return Ok((true, pipe));
+            return Ok(PipelineRunnableResult { success: true, msg, pipeline: Some(pipe) });
         }
-         */
 
-        return Ok((false, None));
+        return Ok(error_result);
     }
 
     /// H5 项目安装依赖
-    fn install_h5_project(app: &AppHandle, pipeline: &Pipeline, props: &PipelineRuntime, project_path: PathBuf, project_name: &str, order: u32, pack_name: &str, stage: &PipelineRuntimeStage) -> Result<(bool, Option<Pipeline>), String> {
+    async fn install_h5_project(app: &AppHandle, pipeline: &Pipeline, runtime: &PipelineRuntime, project_path: PathBuf, project_name: &str, order: u32, pack_name: &str, stage: &PipelineRuntimeStage) -> Result<PipelineRunnableResult, String> {
         if !project_path.exists() {
             let msg = format!("install h5 project dependencies failed, project dir: {:#?} not exists !", project_path);
             error!("{}", msg);
@@ -911,22 +892,25 @@ impl PipelineRunnableStage {
         // result stage
         let mut result_stage = stage.clone();
         // result_stage.status = if success { Some(PipelineStatus::Success) } else { Some(PipelineStatus::Failed) };
+        let mut run = runtime.clone();
+        run.status = if success { PipelineStatus::Success } else { PipelineStatus::Failed };
+        let mut pipe = pipeline.clone();
+        pipe.runtime = Some(run);
 
-        let mut status: Option<PipelineStatus> = None;
-        if !success {
-            status = Some(PipelineStatus::Failed)
-        }
+        let msg = format!("{} install h5 project {:#?} ", &pack_name, project_path);
+        let pipe = PipelineRunnable::exec_end_log(app, &pipe, success, &msg).await;
 
-        let pipe = PipelineRunnable::exec_end_log(app, &pipeline, &props, result_stage.clone(), success, &format!("{} install h5 project {:#?} ", &pack_name, project_path), order, status);
+        let error_result = PipelineRunnableResult { success, msg: String::new(), pipeline: None };
+
         if pipe.is_none() {
-            return Ok((false, None));
+            return Ok(error_result);
         }
 
         if success {
-            return Ok((true, pipe));
+            return Ok(PipelineRunnableResult { success: true, msg, pipeline: pipe });
         }
 
-        return Ok((false, None));
+        return Ok(error_result);
     }
 
     /// 获取 H5 安装的命令，动态智能判断

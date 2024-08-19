@@ -1167,6 +1167,6 @@ impl Pipeline {
         }
 
         let list: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        return list
+        return list;
     }
 }

@@ -1,9 +1,9 @@
 //! 流水线属性
 
+use crate::server::pipeline::index::Pipeline;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
-use crate::server::pipeline::index::Pipeline;
 
 /// 基本信息
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]

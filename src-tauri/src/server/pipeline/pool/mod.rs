@@ -1,24 +1,25 @@
 //! 线程池
 
+use crate::database::helper::DBHelper;
 use crate::database::Database;
 use crate::error::Error;
+use crate::event::EventEmitter;
+use crate::prepare::{get_error_response, get_success_response_by_value};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{PipelineRuntime, PipelineRuntimeStage, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
+use futures::future::join_all;
 use handlers::utils::Utils;
 use log::{error, info};
 use rayon::prelude::*;
+use sqlx::MySql;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use futures::future::join_all;
-use sqlx::MySql;
 use tauri::AppHandle;
-use crate::database::helper::DBHelper;
-use crate::prepare::get_error_response;
 
 /// 存储流水线线程名称
 const PIPELINE_POOLS_NAME: &str = "pipeline_pools";
@@ -32,7 +33,7 @@ impl Pool {
     /// 启动线程池
     pub(crate) async fn start(app: &AppHandle) {
         Self::exec_pool_tasks(app).await;
-        thread::sleep(Duration::from_secs(LOOP_SEC));
+        tokio::time::sleep(Duration::from_secs(LOOP_SEC)).await;
     }
 
     /// 从数据库里读取 pools
@@ -56,7 +57,7 @@ impl Pool {
 
             let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None).await?;
             if pipeline_list.is_empty() {
-                continue
+                continue;
             }
 
             let pipe = pipeline_list.get(0).unwrap();
@@ -68,7 +69,6 @@ impl Pool {
         let mut pools = POOLS.lock().unwrap();
         *pools = task_list
     }
-
 
     /// 放入线程池
     pub(crate) fn insert_into_pool(pipeline: &Pipeline) -> Result<(), String> {
@@ -133,13 +133,16 @@ impl Pool {
         let installed_commands = H5FileHandler::get_installed_commands();
         let app_cloned = Arc::new(app.clone());
         let installed_commands_cloned = Arc::new(installed_commands.clone());
-        let futures: Vec<_> = tasks.par_iter().map(|task| {
-            let app_clone = Arc::clone(&app_cloned);
-            let commands_clone = Arc::clone(&installed_commands_cloned);
-            async move {
-                Self::exec_task(&*app_clone, &*commands_clone, task).await;
-            }
-        }).collect();
+        let futures: Vec<_> = tasks
+            .par_iter()
+            .map(|task| {
+                let app_clone = Arc::clone(&app_cloned);
+                let commands_clone = Arc::clone(&installed_commands_cloned);
+                async move {
+                    Self::exec_task(&*app_clone, &*commands_clone, task).await;
+                }
+            })
+            .collect();
 
         // 并发地等待所有任务完成
         join_all(futures).await;
@@ -169,8 +172,8 @@ impl Pool {
             UPDATE pipeline SET `status` = ? WHERE id = ?
         "#,
         )
-            .bind(PipelineStatus::got(status.clone()))
-            .bind(&pipeline.id);
+        .bind(PipelineStatus::got(status.clone()))
+        .bind(&pipeline.id);
         query_list.push(pipeline_query);
 
         let runtime_query = sqlx::query::<MySql>(
@@ -178,22 +181,33 @@ impl Pool {
             UPDATE pipeline_runtime SET `status` = ?, start_time = ? WHERE id = ?
         "#,
         )
-            .bind(PipelineStatus::got(status.clone()))
-            .bind(&start_time)
-            .bind(&task.runtime.id);
+        .bind(PipelineStatus::got(status.clone()))
+        .bind(&start_time)
+        .bind(&task.runtime.id);
         query_list.push(runtime_query);
 
         let res = DBHelper::batch_commit(query_list).await;
         if res.is_err() {
             error!("{:#?}", res.err());
-            return
+            return;
         }
 
         // 执行 stages
-        PipelineRunnableStage::exec(app, task, installed_commands).await;
+        let pipe = PipelineRunnableStage::exec(app, task, installed_commands).await;
+        let mut runtime = pipe.runtime.unwrap_or(PipelineRuntime::default());
+        let elapsed_time = format!("{:.2?}", start_time.elapsed());
+        runtime.duration = Some(elapsed_time);
 
-        let elapsed_time = format!("{:.2?}", start_time.elapsed()).magenta().bold();
-        PipelineRunnable::exec_end_log(app, &pipeline, &props, error_stage.clone(), false, &msg, stage.order, Some(PipelineStatus::Failed));
+        // 更新数据库
+        match PipelineRunnable::update_stage(&pipe, &runtime).await {
+            Ok(_) => {
+                info!("insert in to history list success !");
+                EventEmitter::log_step_res(app, Some(get_success_response_by_value(pipe.clone())?));
+            }
+            Err(err) => {
+                info!("insert in to history list error: {} !", &err);
+            }
+        }
     }
 
     /// 从 database 中读取任务列表
@@ -201,7 +215,7 @@ impl Pool {
         // 获取排队中的数据
         let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
-            runtime_id: None
+            runtime_id: None,
         }))
         .await?;
 
