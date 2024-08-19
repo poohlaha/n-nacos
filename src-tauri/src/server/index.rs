@@ -10,6 +10,9 @@ use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::info;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::mysql::MySqlArguments;
+use sqlx::query::Query;
 use sqlx::{FromRow, MySql};
 use uuid::Uuid;
 
@@ -157,16 +160,29 @@ impl Treat<HttpResponse> for Server {
         }
 
         let serve = data.get(0).unwrap();
-        let query = sqlx::query::<MySql>("delete from server where id = ?").bind(&serve.id);
-        let result = DBHelper::execute_update(query).await?;
 
-        // 删除流水线
-        Pipeline::clear(&id)?;
+        let pipeline_list = Pipeline::get_pipeline_list_by_server_id(&serve.id).await?;
+
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+
+        // 删除 server
+        let server_query = sqlx::query::<MySql>("DELETE FROM `server` WHERE id = ?").bind(&serve.id);
+        query_list.push(server_query);
+
+        // 删除 pipeline
+        for pipe in pipeline_list.iter() {
+            query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline WHERE id = ?").bind(&pipe.id));
+            Pipeline::delete_by_pipeline(&pipe.id, &mut query_list);
+        }
+
+        let response = DBHelper::batch_commit(query_list).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
 
         // 删除流水线日志
         ServerLogger::delete_log_dir(&id);
-
-        return Ok(result);
+        Ok(get_success_response(Some(Value::Bool(true))))
     }
 
     /// 根据 ID 查找数据

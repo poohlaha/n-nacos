@@ -31,9 +31,61 @@ pub struct PipelineRunnable;
 pub struct PipelineRunnableQueryForm {
     pub(crate) status_list: Vec<String>,
     pub(crate) runtime_id: Option<String>,
+    pub(crate) pipeline_id: Option<String>,
 }
 
 impl PipelineRunnable {
+    /// 删除运行记录
+    pub(crate) async fn delete_runtime(pipeline_id: &str) -> Result<HttpResponse, String> {
+        let mut pipeline = Pipeline::default();
+        pipeline.id = pipeline_id.to_string();
+
+        let response = Self::get_runtime_detail(
+            &pipeline,
+            true,
+            Some(PipelineRunnableQueryForm {
+                status_list: vec![],
+                runtime_id: None,
+                pipeline_id: Some(pipeline_id.to_string().clone()),
+            }),
+        )
+        .await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+        query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline_runtime WHERE pipeline_id = ?").bind(pipeline_id));
+
+        // 删除 pipeline_runtime_snapshot
+        let snapshot_sql = String::from(
+            r#"
+            DELETE FROM
+                pipeline_runtime_snapshot
+            WHERE runtime_id IN (
+                SELECT r.id
+                FROM pipeline_runtime r
+                WHERE r.pipeline_id = ?
+            )
+        "#,
+        );
+        query_list.push(sqlx::query::<MySql>(&snapshot_sql).bind(&pipeline_id));
+
+        // 删除 pipeline_runtime_variable
+        let variable_sql = String::from(
+            r#"
+            DELETE FROM pipeline_runtime_variable
+            WHERE runtime_id = IN (
+                SELECT r.id
+                FROM pipeline_runtime r
+                WHERE r.pipeline_id = ?
+            )
+        "#,
+        );
+        query_list.push(sqlx::query::<MySql>(&variable_sql).bind(&pipeline_id));
+        DBHelper::batch_commit(query_list).await
+    }
+
     /// 获取运行历史记录
     pub(crate) async fn get_runtime_list(query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
         Self::get_runtime_detail(&Pipeline::default(), false, query_form).await
@@ -143,6 +195,11 @@ impl PipelineRunnable {
             if let Some(runtime_id) = query_form.runtime_id.clone() {
                 sql.push_str(&format!(" r.id = '{}'", runtime_id));
             }
+
+            // pipeline_id
+            if let Some(pipeline_id) = query_form.pipeline_id.clone() {
+                sql.push_str(&format!(" r.pipeline_id = '{}'", pipeline_id));
+            }
         }
 
         let query = sqlx::query(&sql);
@@ -186,7 +243,7 @@ impl PipelineRunnable {
                 },
                 stages,
                 status: PipelineStatus::get(&status_str),
-                start_time: row.try_get("start_time").unwrap_or(None),
+                start_time: row.try_get("runtime_start_time").unwrap_or(None),
                 duration: row.try_get("runtime_duration").unwrap_or(None),
                 snapshot: Default::default(),
                 log: row.try_get("runtime_log").unwrap_or(None),
@@ -293,6 +350,7 @@ impl PipelineRunnable {
         let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
             runtime_id: None,
+            pipeline_id: None,
         }))
         .await?;
         if response.code != 200 {
@@ -425,6 +483,7 @@ impl PipelineRunnable {
             Some(PipelineRunnableQueryForm {
                 status_list: vec![],
                 runtime_id: Some(runtime_id.clone()),
+                pipeline_id: None,
             }),
         )
         .await?;

@@ -2,7 +2,6 @@
 
 use crate::database::helper::DBHelper;
 use crate::database::interface::{Treat, TreatBody};
-use crate::database::Database;
 use crate::error::Error;
 use crate::exports::pipeline::QueryForm;
 use crate::helper::git::GitHandler;
@@ -23,7 +22,7 @@ use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::query::Query;
 use sqlx::{FromRow, MySql, Row};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// 存储流水线数据库名称
@@ -31,6 +30,13 @@ pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
 
 /// 存储流水线名称
 const PIPELINE_NAME: &str = "pipelines";
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum Body {
+    String(String),
+    PipelineRuntime(PipelineRuntime),
+}
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
@@ -291,88 +297,7 @@ impl Treat<HttpResponse> for Pipeline {
         let basic = &pipeline.basic;
         let mut query_list = Vec::new();
 
-        // 删除 variables 并重新插入
-        let variable_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_variable WHERE pipeline_id = ?
-        "#,
-        )
-        .bind(&pipeline.id);
-        query_list.push(variable_delete_query);
-
-        // 删除 stage
-        let stage_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_stage
-            WHERE process_id IN (
-                SELECT p.id
-                FROM pipeline_process p
-                WHERE p.pipeline_id = ?
-            );
-        "#,
-        )
-        .bind(&pipeline.id);
-        query_list.push(stage_delete_query);
-
-        // 删除 group
-        let group_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_group
-            WHERE stage_id IN (
-                SELECT s.id FROM pipeline_stage s
-                WHERE s.process_id IN (
-                    SELECT p.id
-                    FROM pipeline_process p
-                    WHERE p.pipeline_id = ?
-                )
-            )
-        "#,
-        )
-        .bind(&pipeline.id);
-        query_list.push(group_delete_query);
-
-        // 删除 step
-        let step_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_step
-            WHERE group_id IN (
-                SELECT g.id FROM pipeline_group g
-                WHERE g.stage_id IN (
-                    SELECT s.id FROM pipeline_stage s
-                    WHERE s.process_id IN (
-                        SELECT p.id
-                        FROM pipeline_process p
-                        WHERE p.pipeline_id = ?
-                    )
-                )
-            )
-        "#,
-        )
-        .bind(&pipeline.id);
-        query_list.push(step_delete_query);
-
-        // 删除 step_component
-        let step_component_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_step_component
-            WHERE step_id IN (
-                SELECT id FROM pipeline_step
-                WHERE group_id IN (
-                    SELECT g.id FROM pipeline_group g
-                    WHERE g.stage_id IN (
-                        SELECT s.id FROM pipeline_stage s
-                        WHERE s.process_id IN (
-                            SELECT p.id
-                            FROM pipeline_process p
-                            WHERE p.pipeline_id = ?
-                        )
-                    )
-                )
-            )
-        "#,
-        )
-        .bind(&pipeline.id);
-        query_list.push(step_component_delete_query);
+        Self::delete_by_pipeline(&pipeline.id, &mut query_list);
 
         // 插入 stages
         Self::insert_stages(&pipeline.process_config, process_id.clone(), create_time.clone(), &mut query_list);
@@ -487,10 +412,12 @@ impl Treat<HttpResponse> for Pipeline {
         let server_id = &pipeline.server_id;
         info!("delete pipeline id: {}, server_id: {}", &id, &server_id);
 
-        let query = sqlx::query::<MySql>("delete from pipeline where id = ? and server_id = ?").bind(&id).bind(&server_id);
-        let mut response = DBHelper::execute_update(query).await?;
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+        query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline WHERE id = ? and server_id = ?").bind(&id).bind(&server_id));
+        Pipeline::delete_by_pipeline(&pipeline.id, &mut query_list);
+        let response = DBHelper::batch_commit(query_list).await?;
+
         if response.code != 200 {
-            response.error = String::from("删除服务器失败");
             return Ok(response);
         }
 
@@ -529,28 +456,27 @@ impl Treat<HttpResponse> for Pipeline {
             return Ok(response);
         }
 
-        let runtime: PipelineRuntime = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        pipeline.runtime = Some(runtime);
+        let result: Body = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
-        /*
-        if let Some(mut run) = pipeline.run.clone() {
-            let mut current = run.current.clone();
-            // 读取日志
-            let log = PipelineLogger::read_log(&pipeline.server_id, &pipeline.id, current.order);
-            match log {
-                Ok(content) => {
-                    current.log = content;
-                    run.current = current;
-                    pipeline.run = Some(run);
-                }
-                Err(err) => {
-                    info!("read pipeline log error: {}", &err)
-                }
+        let runtime = match result {
+            Body::String(_) => None,
+            Body::PipelineRuntime(runtime) => Some(runtime),
+        };
+
+        pipeline.runtime = runtime.clone();
+
+        if let Some(mut runtime) = pipeline.runtime.clone() {
+            let log = &runtime.log;
+            if let Some(log) = log {
+                let log_file = format!("{}.log", runtime.order.unwrap_or(1));
+                let log_file_dir = Path::new(log).join(log_file);
+                let log = PipelineLogger::read_log(log_file_dir)?;
+                runtime.log = Some(log);
+                pipeline.runtime = Some(runtime)
             }
         }
-         */
 
-        let data = serde_json::to_value(pipeline).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let data = serde_json::to_value(pipeline.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
         return Ok(get_success_response(Some(data)));
     }
 }
@@ -875,6 +801,11 @@ impl Pipeline {
             let basic = &pipe.basic;
             let runnable_info = Self::get_runnable_variable(&basic, installed_commands.clone(), &node);
             pipe.runnable_info = Some(runnable_info);
+            let response = PipelineRunnable::get_runtime_detail(&pipe, true, None).await?;
+            if response.code == 200 {
+                let runtime: PipelineRuntime = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
+                pipe.runtime = Some(runtime);
+            }
         }
 
         get_success_response_by_value(list)
@@ -1105,11 +1036,6 @@ impl Pipeline {
         return Some(h5_variables);
     }
 
-    /// 清空
-    pub(crate) fn clear(server_id: &str) -> Result<HttpResponse, String> {
-        Database::delete(PIPELINE_DB_NAME, &Self::get_pipeline_name(server_id))
-    }
-
     /// 查询系统已安装的 commands 列表
     pub(crate) fn query_os_commands() -> Result<HttpResponse, String> {
         let h5_installed_commands = H5FileHandler::get_installed_commands();
@@ -1141,5 +1067,102 @@ impl Pipeline {
 
         let list: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
         return Ok(list);
+    }
+
+    /// 根据 server_id 查找 流水线
+    pub(crate) async fn get_pipeline_list_by_server_id(server_id: &str) -> Result<Vec<Pipeline>, String> {
+        let query = sqlx::query_as::<_, Pipeline>("select * from pipeline where server_id = ?").bind(server_id);
+        let response = DBHelper::execute_query(query).await?;
+        if response.code != 200 {
+            error!("get pipeline list by server_id: {} error: {}", server_id, &response.error);
+            return Ok(Vec::new());
+        }
+
+        return serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+    }
+
+    pub(crate) fn delete_by_pipeline(pipeline_id: &str, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+        // 删除 variables 并重新插入
+        let variable_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_variable WHERE pipeline_id = ?
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(variable_delete_query);
+
+        // 删除 stage
+        let stage_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_stage
+            WHERE process_id IN (
+                SELECT p.id
+                FROM pipeline_process p
+                WHERE p.pipeline_id = ?
+            );
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(stage_delete_query);
+
+        // 删除 group
+        let group_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_group
+            WHERE stage_id IN (
+                SELECT s.id FROM pipeline_stage s
+                WHERE s.process_id IN (
+                    SELECT p.id
+                    FROM pipeline_process p
+                    WHERE p.pipeline_id = ?
+                )
+            )
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(group_delete_query);
+
+        // 删除 step
+        let step_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_step
+            WHERE group_id IN (
+                SELECT g.id FROM pipeline_group g
+                WHERE g.stage_id IN (
+                    SELECT s.id FROM pipeline_stage s
+                    WHERE s.process_id IN (
+                        SELECT p.id
+                        FROM pipeline_process p
+                        WHERE p.pipeline_id = ?
+                    )
+                )
+            )
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(step_delete_query);
+
+        // 删除 step_component
+        let step_component_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_step_component
+            WHERE step_id IN (
+                SELECT id FROM pipeline_step
+                WHERE group_id IN (
+                    SELECT g.id FROM pipeline_group g
+                    WHERE g.stage_id IN (
+                        SELECT s.id FROM pipeline_stage s
+                        WHERE s.process_id IN (
+                            SELECT p.id
+                            FROM pipeline_process p
+                            WHERE p.pipeline_id = ?
+                        )
+                    )
+                )
+            )
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(step_component_delete_query);
     }
 }

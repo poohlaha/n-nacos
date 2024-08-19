@@ -20,13 +20,10 @@ impl Logger {
         log_dirs.insert(0, String::from(LOG_NAME));
 
         let dir = Helper::get_project_config_dir(log_dirs);
-        return match dir {
-            Ok(dir) => dir,
-            Err(err) => {
-                info!("get log dir error: {}", err);
-                None
-            }
-        };
+        return dir.unwrap_or_else(|err| {
+            info!("get log dir error: {}", err);
+            None
+        });
     }
 
     /// 删除日志目录

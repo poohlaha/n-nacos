@@ -65,20 +65,12 @@ impl PipelineLogger {
     }
 
     /// 读取流水线日志
-    pub(crate) fn read_log(server_id: &str, id: &str, order: u32) -> Result<String, String> {
-        let dir = Self::get_log_by_id(server_id, id);
-        info!("pipeline log dir: {:#?}", dir);
-        if let Some(dir) = dir {
-            let log_file_name = format!("{}.log", order);
-            let file_path = dir.join(&log_file_name);
-            info!("pipeline log path: {:#?}", file_path);
-            if !file_path.exists() {
-                return Err(Error::convert_string(&format!("can not find pipeline log file: {:#?} !", file_path)));
-            }
-
-            return FileHandler::read_file_string(file_path.as_path().to_string_lossy().to_string().as_str());
+    pub(crate) fn read_log(file_path: PathBuf) -> Result<String, String> {
+        info!("pipeline log path: {:#?}", file_path);
+        if !file_path.exists() {
+            return Err(Error::convert_string(&format!("can not find pipeline log file: {:#?} !", file_path)));
         }
 
-        return Err(Error::convert_string("can not find pipeline log dir !"));
+        return FileHandler::read_file_string(file_path.as_path().to_string_lossy().to_string().as_str());
     }
 }

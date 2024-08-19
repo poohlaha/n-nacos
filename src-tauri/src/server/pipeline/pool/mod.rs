@@ -3,6 +3,7 @@
 use crate::database::helper::DBHelper;
 use crate::error::Error;
 use crate::event::EventEmitter;
+use crate::logger::Logger;
 use crate::prepare::{get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
@@ -152,6 +153,10 @@ impl Pool {
         pipeline.id = task.pipeline.id.clone();
         pipeline.server_id = task.server_id.clone();
 
+        // 获取日志目录
+        let log_dir = Logger::get_log_dir(vec![pipeline.server_id.clone(), pipeline.id.clone()]);
+        info!("log dir: {:#?}", log_dir);
+
         // 更改状态为 `执行中` 、运行开始时间、序号
         let status = PipelineStatus::Process;
         let start_time = Utils::get_date(None);
@@ -170,14 +175,20 @@ impl Pool {
         .bind(&pipeline.id);
         query_list.push(pipeline_query);
 
-        let runtime_query = sqlx::query::<MySql>(
+        let mut runtime_sql = String::from(
             r#"
-            UPDATE pipeline_runtime SET `status` = ?, start_time = ? WHERE id = ?
+            UPDATE pipeline_runtime SET `status` = ?, start_time = ?
         "#,
-        )
-        .bind(PipelineStatus::got(status.clone()))
-        .bind(&start_time)
-        .bind(&task.runtime.id);
+        );
+
+        if let Some(log_dir) = log_dir {
+            let log = log_dir.as_path().to_string_lossy().to_string();
+            runtime_sql.push_str(&format!(", log = '{}'", log));
+        }
+
+        runtime_sql.push_str(&format!("WHERE id = '{}'", task.runtime.clone().id.unwrap_or(String::new())));
+
+        let runtime_query = sqlx::query::<MySql>(&runtime_sql).bind(PipelineStatus::got(status.clone())).bind(&start_time);
         query_list.push(runtime_query);
 
         let res = DBHelper::batch_commit(query_list).await;
@@ -211,6 +222,7 @@ impl Pool {
         let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
             runtime_id: None,
+            pipeline_id: None,
         }))
         .await?;
 
