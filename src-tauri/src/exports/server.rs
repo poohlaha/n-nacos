@@ -1,6 +1,6 @@
 //! 导出服务器方法
 
-use crate::database::interface::Treat2;
+use crate::database::interface::Treat;
 use crate::prepare::HttpResponse;
 use crate::server::index::Server;
 use crate::task::Task;

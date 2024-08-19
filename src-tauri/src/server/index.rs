@@ -1,10 +1,10 @@
 //! 服务器
 
 use crate::database::helper::DBHelper;
-use crate::database::interface::{Treat, Treat2, TreatBody};
+use crate::database::interface::{Treat, TreatBody};
 use crate::error::Error;
 use crate::logger::server::ServerLogger;
-use crate::prepare::{get_error_response, HttpResponse};
+use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use async_trait::async_trait;
 use handlers::utils::Utils;
@@ -12,12 +12,6 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySql};
 use uuid::Uuid;
-
-/// 存储服务器数据库名称
-const SERVER_DB_NAME: &str = "server";
-
-/// 存储服务器名称
-const SERVER_NAME: &str = "servers";
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Server {
@@ -36,7 +30,7 @@ pub struct Server {
 impl TreatBody for Server {}
 
 #[async_trait]
-impl Treat2<HttpResponse> for Server {
+impl Treat<HttpResponse> for Server {
     type B = Server;
 
     /// 存储 服务器列表
@@ -59,17 +53,13 @@ impl Treat2<HttpResponse> for Server {
         info!("insert server params: {:#?}", server_clone);
 
         // 判断 IP 是否存在
-        let query = sqlx::query_as::<_, Server>("select ip from server where ip = ?").bind(&server.ip);
-        let mut result = DBHelper::execute_query(query).await?;
-        if result.code != 200 {
-            result.error = String::from("保存服务器失败");
-            return Ok(result);
-        }
-
-        let data: Vec<Server> = serde_json::from_value(result.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let query = sqlx::query("select ip from server where ip = ?").bind(&server.ip);
+        let data = DBHelper::execute_rows(query).await?;
         if !data.is_empty() {
             return Ok(get_error_response("保存服务器失败, 该服务器IP已存在"));
         }
+
+        info!("ip not exists, insert server ...");
 
         let query = sqlx::query::<MySql>("INSERT INTO server (id, ip, port, account, pwd, name, description, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&server_clone.id)
@@ -185,9 +175,14 @@ impl Treat2<HttpResponse> for Server {
             return Ok(get_error_response("根据 ID 查找服务器失败, `id` 不能为空"));
         }
 
-        info!("get server by id: {}", &server.id);
-        let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where id = ?").bind(&server.id);
-        return DBHelper::execute_query(query).await;
+        info!("get server by id: {}", server.id);
+        let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, `name`, description, create_time, update_time from `server` where id = ?").bind(&server.id);
+        let serve = DBHelper::execute_query_one(query).await?;
+        if let Some(serve) = serve {
+            get_success_response_by_value(serve)
+        } else {
+            Ok(get_error_response(&format!("get server by id {} error !", server.id)))
+        }
     }
 }
 

@@ -20,16 +20,14 @@ use rayon::ThreadPoolBuilder;
 use crate::database::Database;
 use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::server::pipeline::pool::Pool;
-use crate::server::pipeline::props::{PipelineRuntime, PipelineStageTask};
+use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
-use dotenvy::dotenv;
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
-use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySql;
+use std::env;
 use std::sync::{Arc, Mutex};
-use std::{env, thread};
 use tauri::AppHandle;
 
 const PROJECT_NAME: &str = "n-nacos";
@@ -49,14 +47,6 @@ lazy_static! {
     static ref DATABASE_POOLS: Arc<Mutex<Option<sqlx::Pool<MySql>>>> = Arc::new(Mutex::new(None));
 }
 
-/// 定义数据库连接池
-async fn init_database_pools() -> sqlx::Pool<MySql> {
-    dotenv().ok();
-    let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
-    let database_pool = MySqlPoolOptions::new().max_connections(MAX_DATABASE_COUNT).connect(&url).await.expect(&format!("connect to {url} error !"));
-    return database_pool;
-}
-
 /// 初始化一些属性
 async fn init() {
     // 设置并行任务最大数
@@ -69,9 +59,11 @@ async fn init() {
 // 启动线程来执行线程池中任务
 fn start_task(app: &AppHandle) {
     let app_cloned = Arc::new(app.clone());
-    tauri::async_runtime::spawn(async move || loop {
-        info!("loop pipeline pools ...");
-        Pool::start(&*app_cloned).await;
+    tauri::async_runtime::spawn(async move {
+        loop {
+            info!("loop pipeline pools ...");
+            Pool::start(&*app_cloned).await;
+        }
     });
 }
 

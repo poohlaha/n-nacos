@@ -1,13 +1,12 @@
 //! 线程池
 
 use crate::database::helper::DBHelper;
-use crate::database::Database;
 use crate::error::Error;
 use crate::event::EventEmitter;
-use crate::prepare::{get_error_response, get_success_response_by_value};
+use crate::prepare::{get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{PipelineRuntime, PipelineRuntimeStage, PipelineStageTask, PipelineStatus};
+use crate::server::pipeline::props::{PipelineRuntime, PipelineStageTask, PipelineStatus};
 use crate::server::pipeline::runnable::stage::PipelineRunnableStage;
 use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use crate::{LOOP_SEC, MAX_THREAD_COUNT, POOLS};
@@ -17,15 +16,8 @@ use log::{error, info};
 use rayon::prelude::*;
 use sqlx::MySql;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
-
-/// 存储流水线线程名称
-const PIPELINE_POOLS_NAME: &str = "pipeline_pools";
-
-/// 存储服务器名称
-const POOLS_NAME: &str = "pools";
 
 pub struct Pool;
 
@@ -50,12 +42,15 @@ impl Pool {
         info!("get pools list: {:#?}", list);
         info!("get pools list count: {:#?}", list.len());
 
-        let task_list: Vec<PipelineStageTask> = Vec::new();
         for runtime in list.iter() {
             let mut pipeline = Pipeline::default();
             pipeline.id = runtime.pipeline_id.clone();
 
-            let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None).await?;
+            let pipeline_list = Pipeline::get_pipeline_list(&pipeline, None).await.unwrap_or_else(|err| {
+                error!("get pipeline list error: {}", err);
+                Vec::new()
+            });
+
             if pipeline_list.is_empty() {
                 continue;
             }
@@ -65,9 +60,6 @@ impl Pool {
             pip.runtime = Some(runtime.clone());
             Self::insert_into_pool(&pip).unwrap_or(());
         }
-
-        let mut pools = POOLS.lock().unwrap();
-        *pools = task_list
     }
 
     /// 放入线程池
@@ -95,11 +87,9 @@ impl Pool {
         let mut pools = POOLS.lock().unwrap();
         let mut has_found = false;
         for item in pools.iter_mut() {
-            if let Some(id) = &item.id {
-                if id.as_str() == task.id.as_str() && &item.pipeline.id == &task.pipeline.id {
-                    *item = task.clone(); // 存在则替换
-                    has_found = true;
-                }
+            if item.id.as_str() == task.id.as_str() && &item.pipeline.id == &task.pipeline.id {
+                *item = task.clone(); // 存在则替换
+                has_found = true;
             }
         }
 
@@ -111,24 +101,27 @@ impl Pool {
         }
 
         info!("pools task list: {:#?}", pools);
-        info!("insert into success !");
+        info!("insert into pools success !");
         Ok(())
     }
 
     /// 运行任务
     pub(crate) async fn exec_pool_tasks(app: &AppHandle) {
         info!("exec pipeline pools tasks ...");
-        let mut pools = POOLS.lock().unwrap();
-        if pools.is_empty() {
-            info!("pipeline pools is empty !");
-            return;
-        }
+        let tasks: Vec<PipelineStageTask> = {
+            let mut pools = POOLS.lock().unwrap();
+            if pools.is_empty() {
+                info!("pipeline pools is empty !");
+                return;
+            }
 
-        // 取出 MAX_THREAD_COUNT 条数据
-        let pool_len = pools.len();
-        let len = pool_len.min(MAX_THREAD_COUNT as usize); // 取 pools 的长度和 5 的最小值
-        let tasks: Vec<PipelineStageTask> = pools.drain(0..len).collect();
-        info!("pipeline pools lave count: {}", pool_len - len);
+            // 取出 MAX_THREAD_COUNT 条数据
+            let pool_len = pools.len();
+            let len = pool_len.min(MAX_THREAD_COUNT as usize); // 取 pools 的长度和 5 的最小值
+            let tasks: Vec<PipelineStageTask> = pools.drain(0..len).collect();
+            info!("pipeline pools lave count: {}", pool_len - len);
+            tasks
+        };
 
         let installed_commands = H5FileHandler::get_installed_commands();
         let app_cloned = Arc::new(app.clone());
@@ -153,10 +146,10 @@ impl Pool {
     pub(crate) async fn exec_task(app: &AppHandle, installed_commands: &Vec<String>, task: &PipelineStageTask) {
         info!("exec task: {:#?}", task);
 
-        let start_time = Instant::now();
+        let start_now = Instant::now();
 
         let mut pipeline = Pipeline::default();
-        pipeline.id = task.id.clone();
+        pipeline.id = task.pipeline.id.clone();
         pipeline.server_id = task.server_id.clone();
 
         // 更改状态为 `执行中` 、运行开始时间、序号
@@ -169,10 +162,11 @@ impl Pool {
         let mut query_list = Vec::new();
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            UPDATE pipeline SET `status` = ? WHERE id = ?
+            UPDATE pipeline SET `status` = ?, last_run_time = ? WHERE id = ?
         "#,
         )
         .bind(PipelineStatus::got(status.clone()))
+        .bind(&start_time)
         .bind(&pipeline.id);
         query_list.push(pipeline_query);
 
@@ -194,18 +188,19 @@ impl Pool {
 
         // 执行 stages
         let pipe = PipelineRunnableStage::exec(app, task, installed_commands).await;
-        let mut runtime = pipe.runtime.unwrap_or(PipelineRuntime::default());
-        let elapsed_time = format!("{:.2?}", start_time.elapsed());
-        runtime.duration = Some(elapsed_time);
+        let mut runtime = pipe.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let elapsed_now = format!("{:.2?}", start_now.elapsed());
+        runtime.duration = Some(elapsed_now);
+        info!("exec task duration: {:?}", runtime.duration);
 
         // 更新数据库
         match PipelineRunnable::update_stage(&pipe, &runtime).await {
             Ok(_) => {
-                info!("insert in to history list success !");
-                EventEmitter::log_step_res(app, Some(get_success_response_by_value(pipe.clone())?));
+                let res = get_success_response_by_value(pipe.clone()).unwrap_or(HttpResponse::default());
+                EventEmitter::log_step_res(app, Some(res));
             }
             Err(err) => {
-                info!("insert in to history list error: {} !", &err);
+                info!("update stage error: {} !", &err);
             }
         }
     }

@@ -1,9 +1,8 @@
 //! 读取服务器远程监控信息
 
-use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
-use crate::prepare::{convert_res, get_error_response, get_success_response, HttpResponse};
+use crate::prepare::{get_error_response, get_success_response, HttpResponse};
 use crate::server::index::Server;
 use crypto_hash::{hex_digest, Algorithm};
 use handlers::file::FileHandler;

@@ -1,7 +1,7 @@
 //! 流水线
 
 use crate::database::helper::DBHelper;
-use crate::database::interface::{Treat, Treat2, TreatBody};
+use crate::database::interface::{Treat, TreatBody};
 use crate::database::Database;
 use crate::error::Error;
 use crate::exports::pipeline::QueryForm;
@@ -13,7 +13,6 @@ use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{
     H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable,
 };
-use crate::server::pipeline::runnable;
 use crate::server::pipeline::runnable::PipelineRunnable;
 use async_trait::async_trait;
 use handlers::utils::Utils;
@@ -94,7 +93,7 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
 impl TreatBody for Pipeline {}
 
 #[async_trait]
-impl Treat2<HttpResponse> for Pipeline {
+impl Treat<HttpResponse> for Pipeline {
     type B = Pipeline;
 
     /// 列表
@@ -805,7 +804,7 @@ impl Pipeline {
             let step_component = step_component_map.get(step_component_id);
             if let Some(step_component) = step_component {
                 let step = step_map.get_mut(&step_component.step_id);
-                if let Some(mut step) = step {
+                if let Some(step) = step {
                     step.components.push(step_component.clone());
                 }
             }
@@ -816,7 +815,7 @@ impl Pipeline {
             let step = step_map.get(step_id);
             if let Some(step) = step {
                 let group = group_map.get_mut(&step.group_id);
-                if let Some(mut group) = group {
+                if let Some(group) = group {
                     group.steps.push(step.clone());
                 }
             }
@@ -827,7 +826,7 @@ impl Pipeline {
             let group = group_map.get(group_id);
             if let Some(group) = group {
                 let stage = stage_map.get_mut(&group.stage_id);
-                if let Some(mut stage) = stage {
+                if let Some(stage) = stage {
                     stage.groups.push(group.clone());
                 }
             }
@@ -838,7 +837,7 @@ impl Pipeline {
             let stage = stage_map.get(stage_id);
             if let Some(stage) = stage {
                 let process = process_map.get_mut(&stage.process_id);
-                if let Some(mut process) = process {
+                if let Some(process) = process {
                     process.stages.push(stage.clone());
                 }
             }
@@ -849,7 +848,7 @@ impl Pipeline {
             let process = process_map.get(process_id);
             if let Some(process) = process {
                 let pipe = map.get_mut(&process.pipeline_id);
-                if let Some(mut pipe) = pipe {
+                if let Some(pipe) = pipe {
                     pipe.process_config = process.clone()
                 }
             }
@@ -860,7 +859,7 @@ impl Pipeline {
             let variable = variable_map.get(variable_id);
             if let Some(variable) = variable {
                 let pipe = map.get_mut(&variable.pipeline_id.clone().unwrap_or(String::new()));
-                if let Some(mut pipe) = pipe {
+                if let Some(pipe) = pipe {
                     pipe.variables.push(variable.clone())
                 }
             }
@@ -1106,12 +1105,6 @@ impl Pipeline {
         return Some(h5_variables);
     }
 
-    /// 更新流水线
-    pub(crate) fn update_pipeline(data: Vec<Pipeline>, pipeline: &Pipeline) -> Result<HttpResponse, String> {
-        let pipelines: Vec<Pipeline> = data.iter().map(|s| if &s.id == &pipeline.id { pipeline.clone() } else { s.clone() }).collect();
-        return Database::update::<Pipeline>(PIPELINE_DB_NAME, &Self::get_pipeline_name(&pipeline.server_id), pipelines, "更新流水线失败");
-    }
-
     /// 清空
     pub(crate) fn clear(server_id: &str) -> Result<HttpResponse, String> {
         Database::delete(PIPELINE_DB_NAME, &Self::get_pipeline_name(server_id))
@@ -1126,47 +1119,27 @@ impl Pipeline {
     /// 清空运行历史, 删除流水线运行日志记录
     pub(crate) async fn clear_run_history(pipeline: &Pipeline) -> Result<HttpResponse, String> {
         let res = Pipeline::get_by_id(&pipeline).await?;
-        let mut pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        /*
-        let run = pipeline.run;
-        if let Some(run) = run {
-            let mut run_cloned = run.clone();
-            run_cloned.history_list = Vec::new();
-            pipeline.run = Some(run_cloned);
-            let response = Self::update(&pipeline).await;
-            return match response {
-                Ok(_) => {
-                    // 删除流水线日志
-                    let bool = PipelineLogger::delete_log_by_id(&pipeline.server_id, &pipeline.id);
-                    if !bool {
-                        info!("clear run history failed, can not delete log files !");
-                        return Ok(get_error_response(&format!("清除运行历史失败, 无法删除日志文件!")));
-                    }
+        let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
-                    info!("clear run history success!");
-                    get_success_response_by_value(pipeline)
-                }
-                Err(err) => {
-                    info!("clear run history error: {}", err);
-                    Ok(get_error_response(&format!("清除运行历史失败: {err}")))
-                }
-            };
+        // 删除流水线日志
+        let bool = PipelineLogger::delete_log_by_id(&pipeline.server_id, &pipeline.id);
+        if bool {
+            info!("clear run history success !");
+            return Ok(get_success_response(None));
+        } else {
+            info!("clear run history failed, can not delete log files !");
+            Ok(get_error_response("清除运行历史失败, 无法删除日志文件"))
         }
-         */
-
-        let msg = "clear run history failed, `run` prop is empty !";
-        error!("{}", msg);
-        return Err(Error::convert_string(msg));
     }
 
-    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Vec<Pipeline> {
+    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Result<Vec<Pipeline>, String> {
         let response = Pipeline::get_query_list(&pipeline, query_form).await?;
         if response.code != 200 {
             error!("get pipeline list error: {:#?}", response.error);
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let list: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        return list;
+        return Ok(list);
     }
 }

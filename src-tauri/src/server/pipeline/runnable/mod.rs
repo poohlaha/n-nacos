@@ -3,7 +3,6 @@
 pub(crate) mod stage;
 
 use crate::database::helper::DBHelper;
-use crate::database::interface::{Treat, Treat2};
 use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::helper::git::GitHandler;
@@ -11,12 +10,10 @@ use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::pool::Pool;
-use crate::server::pipeline::props::{PipelineBasic, PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeStage, PipelineRuntimeVariable, PipelineStage, PipelineStageTask, PipelineStatus, PipelineTag, PipelineVariable};
-use crate::POOLS;
+use crate::server::pipeline::props::{PipelineBasic, PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeStage, PipelineRuntimeVariable, PipelineStage, PipelineStatus, PipelineTag};
 use handlers::utils::Utils;
 use lazy_static::lazy_static;
 use log::{error, info};
-use serde_json::Value;
 use sqlx::mysql::MySqlArguments;
 use sqlx::query::Query;
 use sqlx::{MySql, Row};
@@ -234,7 +231,7 @@ impl PipelineRunnable {
                 let snapshot_id = &variable.snapshot_id;
                 if let Some(snapshot_id) = snapshot_id {
                     let snapshot = snapshot_map.get_mut(&snapshot_id.clone());
-                    if let Some(mut snapshot) = snapshot {
+                    if let Some(snapshot) = snapshot {
                         snapshot.runnable_variables.push(variable.clone());
                     }
                 }
@@ -247,13 +244,13 @@ impl PipelineRunnable {
             if let Some(snapshot) = snapshot {
                 let runtime_id = &snapshot.runtime_id;
                 let runtime = map.get_mut(&runtime_id.clone());
-                if let Some(mut runtime) = runtime {
+                if let Some(runtime) = runtime {
                     runtime.snapshot = snapshot.clone();
                 }
             }
         }
 
-        let mut list: Vec<PipelineRuntime> = map.into_values().collect();
+        let list: Vec<PipelineRuntime> = map.into_values().collect();
         if list.len() == 0 {
             return Ok(get_success_response(None));
         }
@@ -457,17 +454,15 @@ impl PipelineRunnable {
         let mut result: Vec<PipelineRuntime> = Vec::new();
 
         // 插入到线程池
-        /*
-        list.iter().for_each(|props| async move {
-            match Self::exec(props).await {
-                Ok(_) => result.push(props.clone()),
+        for runtime in list.iter() {
+            match Self::exec(runtime).await {
+                Ok(_) => result.push(runtime.clone()),
                 Err(err) => {
-                    error!("exec pipeline id: {} error: {}", &props.id, &err);
+                    error!("exec pipeline id: {:#?} error: {}", &runtime.id, &err);
                     result_errors.push(get_error_response(&err))
                 }
             };
-        });
-         */
+        }
 
         if result.is_empty() {
             error!("exec pipeline list failed, no data need to batch run !");
@@ -477,10 +472,6 @@ impl PipelineRunnable {
         if !result_errors.is_empty() {
             return Ok(get_success_response(Some(serde_json::Value::String(String::from("some pipeline into pools error !")))));
         }
-
-        // 更新线程池数据库
-        let pools = POOLS.lock().unwrap();
-        Pool::update(pools.clone())?;
 
         info!("insert into pools success !");
         return Ok(get_success_response(None));
@@ -526,7 +517,7 @@ impl PipelineRunnable {
 
         let mut runtime_sql = String::from(
             r#"
-            UPDATE pipeline
+            UPDATE pipeline_runtime
             SET `status` = ?, stage_index = ?, group_index = ?, step_index = ?, finished = ?
         "#,
         );
@@ -534,6 +525,8 @@ impl PipelineRunnable {
         if let Some(duration) = &runtime.duration {
             runtime_sql.push_str(&format!(", duration = '{}'", duration));
         }
+
+        runtime_sql.push_str(" WHERE id = ?");
 
         let runtime_query = sqlx::query::<MySql>(&runtime_sql)
             .bind(PipelineStatus::got(runtime.status.clone()))

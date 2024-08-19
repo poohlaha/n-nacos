@@ -51,7 +51,7 @@ impl EventEmitter {
         let emit = app.emit(event_name, EventSendMsg { msg: msg.to_string(), id: id.to_string() });
         match emit {
             Ok(_) => {
-                info!("send string to window success !");
+                // info!("send string to window success !");
             }
             Err(err) => {
                 error!("send string to window error: {}", err.to_string());

@@ -20,7 +20,7 @@ impl Helper {
         }
 
         if let Some(data_dir) = path {
-            info!("config root dir: {:#?}", data_dir);
+            // info!("config root dir: {:#?}", data_dir);
             let mut project_config_dir = data_dir.join(PROJECT_NAME);
             if names.len() > 0 {
                 names.iter().for_each(|name| {
@@ -28,7 +28,7 @@ impl Helper {
                 })
             }
 
-            info!("config dir: {:#?}", project_config_dir);
+            // info!("config dir: {:#?}", project_config_dir);
             // 创建目录
             let path = FileHandler::create_dirs(project_config_dir.to_str().unwrap())?;
             return Ok(Some(path));

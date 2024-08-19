@@ -1,6 +1,6 @@
 //! 流水线导出列表
 
-use crate::database::interface::{Treat, Treat2};
+use crate::database::interface::Treat;
 use crate::prepare::HttpResponse;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::props::PipelineRuntime;
