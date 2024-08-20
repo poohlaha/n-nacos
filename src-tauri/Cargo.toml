@@ -26,7 +26,6 @@ serde_json = "1.0"
 lazy_static = "1.4"
 ssh2 = "0.9"
 async-std = "1.12"
-sled = "0.34"
 dirs = "5.0"
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_debug"] }
 thiserror = "1.0"

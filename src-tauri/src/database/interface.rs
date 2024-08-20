@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[allow(dead_code)]
 pub trait TreatBody: Serialize + DeserializeOwned + 'static {}
 
 #[async_trait]

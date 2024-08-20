@@ -20,6 +20,7 @@ impl Task {
     }
 
     /// 异步任务
+    #[allow(dead_code)]
     pub(crate) async fn task_param<T, F>(body: T, func: F) -> Result<HttpResponse, String>
     where
         T: DeserializeOwned + Serialize + Clone + Send + Sync + 'static,

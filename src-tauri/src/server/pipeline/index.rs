@@ -25,12 +25,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// 存储流水线数据库名称
-pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
-
-/// 存储流水线名称
-const PIPELINE_NAME: &str = "pipelines";
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
     pub(crate) id: String,
@@ -918,11 +912,6 @@ impl Pipeline {
         }
     }
 
-    /// 流水线存储名字: PIPELINE_NAME_流水线ID
-    fn get_pipeline_name(server_id: &str) -> String {
-        return format!("{}_{}", PIPELINE_NAME, server_id);
-    }
-
     /// 数据检查
     fn validate(pipeline: &Pipeline) -> Option<HttpResponse> {
         let basic = &pipeline.basic;
@@ -1028,11 +1017,16 @@ impl Pipeline {
         let res = Pipeline::get_by_id(&pipeline).await?;
         let pipeline: Pipeline = serde_json::from_value(res.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
+        let response = PipelineRunnable::delete_runtime(&pipeline.id).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
         // 删除流水线日志
         let bool = PipelineLogger::delete_log_by_id(&pipeline.server_id, &pipeline.id);
         if bool {
             info!("clear run history success !");
-            return Ok(get_success_response(None));
+            return Pipeline::get_by_id(&pipeline).await;
         } else {
             info!("clear run history failed, can not delete log files !");
             Ok(get_error_response("清除运行历史失败, 无法删除日志文件"))

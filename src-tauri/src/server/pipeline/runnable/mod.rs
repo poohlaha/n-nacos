@@ -13,12 +13,12 @@ use crate::server::pipeline::props::{PipelineBasic, PipelineRuntime, PipelineRun
 use handlers::utils::Utils;
 use lazy_static::lazy_static;
 use log::{error, info};
+use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlArguments;
 use sqlx::query::Query;
 use sqlx::{MySql, Row};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ pub struct PipelineRunnableQueryForm {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct PipelineRuntimeResult {
     pub(crate) runtime: Option<PipelineRuntime>,
-    pub(crate) runtime_list: Vec<PipelineRuntime>
+    pub(crate) runtime_list: Vec<PipelineRuntime>,
 }
 
 impl PipelineRunnable {
@@ -46,7 +46,8 @@ impl PipelineRunnable {
         pipeline.id = pipeline_id.to_string();
 
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
-        query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline_runtime WHERE pipeline_id = ?").bind(pipeline_id));
+        // 设置 pipeline 中的 status, last_run_time 为空
+        query_list.push(sqlx::query::<MySql>("UPDATE pipeline SET `status` = '', last_run_time = '' WHERE id = ?").bind(pipeline_id));
 
         // 删除 pipeline_runtime_snapshot
         let snapshot_sql = String::from(
@@ -65,15 +66,26 @@ impl PipelineRunnable {
         // 删除 pipeline_runtime_variable
         let variable_sql = String::from(
             r#"
-            DELETE FROM pipeline_runtime_variable
-            WHERE runtime_id = IN (
-                SELECT r.id
-                FROM pipeline_runtime r
-                WHERE r.pipeline_id = ?
-            )
+            DELETE FROM
+              pipeline_runtime_variable
+            WHERE
+              snapshot_id IN (
+                SELECT id FROM
+                  pipeline_runtime_snapshot
+                WHERE
+                  runtime_id IN (
+                    SELECT
+                        r.id
+                    FROM
+                        pipeline_runtime r
+                    WHERE
+                        r.pipeline_id = ?
+                )
+              )
         "#,
         );
         query_list.push(sqlx::query::<MySql>(&variable_sql).bind(&pipeline_id));
+        query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline_runtime WHERE pipeline_id = ?").bind(pipeline_id));
         DBHelper::batch_commit(query_list).await
     }
 
@@ -302,17 +314,14 @@ impl PipelineRunnable {
 
         if only_one {
             if let Some(runtime) = list.get(0) {
-               return Ok(PipelineRuntimeResult {
-                   runtime: Some(runtime.clone()),
-                   runtime_list: vec![],
-               })
+                return Ok(PipelineRuntimeResult {
+                    runtime: Some(runtime.clone()),
+                    runtime_list: vec![],
+                });
             }
         }
 
-        return Ok(PipelineRuntimeResult {
-            runtime: None,
-            runtime_list: list
-        });
+        return Ok(PipelineRuntimeResult { runtime: None, runtime_list: list });
     }
 
     /// 添加到线程池中
@@ -331,7 +340,7 @@ impl PipelineRunnable {
 
         // 查询流水线是否存在
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None, false).await?;
+        let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None, true).await?;
         if pipeline_list.is_empty() {
             return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
         }
@@ -342,10 +351,15 @@ impl PipelineRunnable {
 
         // 查询流水线是不是在排队状态或执行状态
         info!("查询当前流水线是否在排队或执行状态...");
-        let result = PipelineRunnable::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
-            status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
-            runtime_id: None,
-        })).await?;
+        let result = PipelineRunnable::get_runtime_detail(
+            &pipeline,
+            true,
+            Some(PipelineRunnableQueryForm {
+                status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
+                runtime_id: None,
+            }),
+        )
+        .await?;
 
         if result.runtime.is_some() {
             return Ok(get_error_response("该流水线已在运行状态, 请等待运行完成"));
@@ -483,8 +497,12 @@ impl PipelineRunnable {
 
         let mut pip = pipe.clone();
         pip.runtime = result.runtime;
-        Pool::insert_into_pool(&pipe)?;
-        Ok(get_success_response(None))
+        pip.status = Some(PipelineStatus::Queue);
+
+        info!("pip: {:#?}", pip);
+        // thread::sleep(Duration::from_secs(1000000));
+        Pool::insert_into_pool(&pip)?;
+        Ok(get_success_response_by_value(pip).unwrap_or(HttpResponse::default()))
     }
 }
 

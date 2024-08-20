@@ -102,6 +102,7 @@ impl EventEmitter {
     }
 
     /// 发送运行结果
+    #[allow(dead_code)]
     pub(crate) fn log_res(app: &AppHandle, response: Option<HttpResponse>) {
         info!("send run response {:#?}", response);
         EventEmitter::emit(app, EventSendParams { response, id: None, msg: String::new() }, 0);

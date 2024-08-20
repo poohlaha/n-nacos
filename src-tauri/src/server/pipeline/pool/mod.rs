@@ -197,11 +197,24 @@ impl Pool {
             return;
         }
 
+        let mut task = task.clone();
+        let mut pipe = task.pipeline;
+        let mut runtime = task.runtime;
+        pipe.status = Some(status.clone());
+        pipe.last_run_time = Some(start_time.clone());
+        runtime.status = status.clone();
+        runtime.start_time = Some(start_time.clone());
+        pipe.runtime = Some(runtime.clone());
+        task.pipeline = pipe;
+        task.runtime = runtime;
+
         // 执行 stages
-        let pipe = PipelineRunnableStage::exec(app, task, installed_commands).await;
+        let mut pipe = PipelineRunnableStage::exec(app, &task, installed_commands).await;
         let mut runtime = pipe.clone().runtime.unwrap_or(PipelineRuntime::default());
         let elapsed_now = format!("{:.2?}", start_now.elapsed());
         runtime.duration = Some(elapsed_now);
+        pipe.runtime = Some(runtime.clone());
+
         info!("exec task duration: {:?}", runtime.duration);
 
         // 更新数据库
@@ -232,36 +245,4 @@ impl Pool {
         let data: Vec<PipelineRuntime> = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
         Ok(data)
     }
-
-    /*
-    pub(crate) fn update(tasks: Vec<PipelineStageTask>) -> Result<(), String> {
-        info!("update pools task count: {}", tasks.len());
-        Database::update::<PipelineStageTask>(PIPELINE_POOLS_NAME, POOLS_NAME, tasks, "更新线程池失败")?;
-        info!("update pools list success !");
-        Ok(())
-    }
-
-    pub(crate) fn delete(tasks: Vec<PipelineStageTask>) -> Result<(), String> {
-        if tasks.is_empty() {
-            return Ok(());
-        }
-
-        let list = Self::get_list()?;
-        if list.is_empty() {
-            return Ok(());
-        }
-
-        let list: Vec<PipelineStageTask> = list
-            .into_iter()
-            .filter(|list_item| !tasks.iter().any(|task_item| list_item.id == task_item.id && list_item.server_id == task_item.server_id))
-            .collect();
-
-        info!("delete pool list count: {:#?}", tasks.len());
-        info!("delete pool lave count: {}", list.len());
-        info!("delete pool lave list: {:#?}", list);
-        Self::update(list)?;
-
-        Ok(())
-    }
-     */
 }
