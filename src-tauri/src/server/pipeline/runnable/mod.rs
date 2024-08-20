@@ -3,6 +3,8 @@
 pub(crate) mod stage;
 
 use crate::database::helper::DBHelper;
+use crate::database::interface::Treat;
+use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::helper::git::GitHandler;
 use crate::logger::pipeline::PipelineLogger;
@@ -49,20 +51,6 @@ impl PipelineRunnable {
         // 设置 pipeline 中的 status, last_run_time 为空
         query_list.push(sqlx::query::<MySql>("UPDATE pipeline SET `status` = '', last_run_time = '' WHERE id = ?").bind(pipeline_id));
 
-        // 删除 pipeline_runtime_snapshot
-        let snapshot_sql = String::from(
-            r#"
-            DELETE FROM
-                pipeline_runtime_snapshot
-            WHERE runtime_id IN (
-                SELECT r.id
-                FROM pipeline_runtime r
-                WHERE r.pipeline_id = ?
-            )
-        "#,
-        );
-        query_list.push(sqlx::query::<MySql>(&snapshot_sql).bind(&pipeline_id));
-
         // 删除 pipeline_runtime_variable
         let variable_sql = String::from(
             r#"
@@ -84,7 +72,21 @@ impl PipelineRunnable {
               )
         "#,
         );
+
+        // 删除 pipeline_runtime_snapshot
+        let snapshot_sql = String::from(
+            r#"
+            DELETE FROM
+                pipeline_runtime_snapshot
+            WHERE runtime_id IN (
+                SELECT r.id
+                FROM pipeline_runtime r
+                WHERE r.pipeline_id = ?
+            )
+        "#,
+        );
         query_list.push(sqlx::query::<MySql>(&variable_sql).bind(&pipeline_id));
+        query_list.push(sqlx::query::<MySql>(&snapshot_sql).bind(&pipeline_id));
         query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline_runtime WHERE pipeline_id = ?").bind(pipeline_id));
         DBHelper::batch_commit(query_list).await
     }
@@ -120,7 +122,7 @@ impl PipelineRunnable {
              WITH LatestRuntime AS (
                     SELECT
                         r.pipeline_id,
-                        MAX(r.create_time) AS latest_create_time
+                        MAX(r.start_time) AS latest_start_time
                     FROM
                         pipeline_runtime r
                     GROUP BY
@@ -366,6 +368,13 @@ impl PipelineRunnable {
         }
 
         let pipe = pipeline_list.get(0).unwrap();
+        let status = PipelineStatus::got(PipelineStatus::Queue); // 排队中
+        let stage = &props.stage;
+
+        // 错误阶段重试
+        if stage.stage_index > 0 || stage.group_index > 0 || stage.step_index > 0 {
+            return Self::retry(&pipeline).await;
+        }
 
         info!("query max order ...");
         // 查询 pipeline_runtime order
@@ -392,7 +401,6 @@ impl PipelineRunnable {
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         let stage = &props.stage;
         let create_time = Utils::get_date(None);
-        let status = PipelineStatus::got(PipelineStatus::Queue); // 排队中
 
         // 更新 pipeline 表 status
         let pipeline_query = sqlx::query::<MySql>(
@@ -481,28 +489,57 @@ impl PipelineRunnable {
         }
 
         // 查询数据, 并插入到线程池
-        let result = Self::get_runtime_detail(
-            &pipeline,
-            true,
-            Some(PipelineRunnableQueryForm {
-                status_list: vec![],
-                runtime_id: Some(runtime_id.clone()),
-            }),
-        )
-        .await?;
-
-        if result.runtime.is_none() {
-            return Ok(get_error_response("运行流水线失败, 查询运行数据失败"));
+        let response = Pipeline::get_by_id(&pipeline).await?;
+        if response.code != 200 {
+            return Ok(response);
         }
 
-        let mut pip = pipe.clone();
-        pip.runtime = result.runtime;
-        pip.status = Some(PipelineStatus::Queue);
-
-        info!("pip: {:#?}", pip);
+        let pipe: Pipeline = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        info!("pipe: {:#?}", pipe);
         // thread::sleep(Duration::from_secs(1000000));
-        Pool::insert_into_pool(&pip)?;
-        Ok(get_success_response_by_value(pip).unwrap_or(HttpResponse::default()))
+        Pool::insert_into_pool(&pipe)?;
+        Ok(get_success_response_by_value(pipe).unwrap_or(HttpResponse::default()))
+    }
+
+    /// 错误阶段重试
+    async fn retry(pipeline: &Pipeline) -> Result<HttpResponse, String> {
+        let status = PipelineStatus::got(PipelineStatus::Queue); // 排队中
+        let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+
+        // 更新 pipeline 表 status
+        let pipeline_query = sqlx::query::<MySql>(
+            r#"
+                    UPDATE pipeline SET `status` = ?
+                "#,
+        )
+        .bind(&status);
+        query_list.push(pipeline_query);
+
+        // 更新 pipeline_runtime 表中的 status, start_time = '', duration = ''
+        let runtime_query = sqlx::query::<MySql>(
+            r#"
+                    UPDATE pipeline_runtime SET `status` = ?, start_time = '', duration = '' WHERE pipeline_id = ?
+                "#,
+        )
+        .bind(&status)
+        .bind(&pipeline.id);
+        query_list.push(runtime_query);
+
+        let response = DBHelper::batch_commit(query_list).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        // 查询数据, 并插入到线程池
+        let response = Pipeline::get_by_id(&pipeline).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let pipe: Pipeline = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        info!("retry pipe: {:#?}", pipe);
+        Pool::insert_into_pool(&pipe)?;
+        Ok(get_success_response_by_value(pipe).unwrap_or(HttpResponse::default()))
     }
 }
 

@@ -69,7 +69,6 @@ impl PipelineRunnableStage {
         if list.is_empty() {
             let mut runtime = task.runtime.clone();
             runtime.status = PipelineStatus::Failed;
-            runtime.stage.stage_index = 1;
             let mut pipe = pipeline.clone();
             pipe.runtime = Some(runtime);
             pipe.status = Some(PipelineStatus::Failed);
@@ -77,10 +76,43 @@ impl PipelineRunnableStage {
             return pipe;
         }
 
-        info!("exec steps list: {:#?}", list);
+        // 根据 stage_index, group_index, step_index 过滤
+        let stage = runtime.stage.clone();
+        let mut steps: Vec<PipelineRunnableStageStep> = Vec::new();
+        for step in list.iter() {
+            if step.stage_index < stage.stage_index {
+                continue;
+            }
+
+            if step.stage_index == stage.stage_index {
+                if step.group_index < stage.group_index {
+                    continue;
+                }
+
+                if step.group_index == stage.group_index {
+                    if step.step_index < stage.step_index {
+                        continue;
+                    }
+                }
+            }
+
+            steps.push(step.clone())
+        }
+
+        if steps.len() == 0 {
+            let mut runtime = task.runtime.clone();
+            runtime.status = PipelineStatus::Failed;
+            let mut pipe = pipeline.clone();
+            pipe.runtime = Some(runtime);
+            pipe.status = Some(PipelineStatus::Failed);
+            PipelineRunnable::exec_end_log(app, &pipeline, false, "exec stages failed, `stages` prop is empty !").await;
+            return pipe;
+        }
+
+        info!("exec filter steps list: {:#?}", steps);
 
         // 执行所有的 step
-        return Self::exec_steps(app, &task, list, installed_commands).await;
+        return Self::exec_steps(app, &task, steps, installed_commands).await;
     }
 
     /// 执行所有的 step
