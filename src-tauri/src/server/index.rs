@@ -95,7 +95,7 @@ impl Treat<HttpResponse> for Server {
         let mut response: HttpResponse = Self::get_by_id(&server).await?;
         info!("get server by id: {} response: {:#?}", server.id, response);
         if response.code != 200 {
-            response.error = String::from("更新服务器失败");
+            response.error = String::from("更新服务器失败, 该服务器不存在");
             return Ok(response);
         }
 
@@ -104,12 +104,7 @@ impl Treat<HttpResponse> for Server {
 
         info!("update server params: {:#?}", server_clone);
 
-        let data: Vec<Server> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if data.is_empty() {
-            return Ok(get_error_response("更新服务器失败, 该服务器不存在"));
-        }
-
-        let serve = data.get(0).unwrap();
+        let serve: Server = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
 
         // 判断 IP 是否存在
         let query = sqlx::query_as::<_, Server>("select id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time from server where ip = ? and id != ?")

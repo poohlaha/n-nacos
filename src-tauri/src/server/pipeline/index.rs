@@ -1066,57 +1066,6 @@ impl Pipeline {
         .bind(pipeline_id.to_string().clone());
         query_list.push(variable_delete_query);
 
-        // 删除 stage
-        let stage_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_stage
-            WHERE process_id IN (
-                SELECT p.id
-                FROM pipeline_process p
-                WHERE p.pipeline_id = ?
-            );
-        "#,
-        )
-        .bind(pipeline_id.to_string().clone());
-        query_list.push(stage_delete_query);
-
-        // 删除 group
-        let group_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_group
-            WHERE stage_id IN (
-                SELECT s.id FROM pipeline_stage s
-                WHERE s.process_id IN (
-                    SELECT p.id
-                    FROM pipeline_process p
-                    WHERE p.pipeline_id = ?
-                )
-            )
-        "#,
-        )
-        .bind(pipeline_id.to_string().clone());
-        query_list.push(group_delete_query);
-
-        // 删除 step
-        let step_delete_query = sqlx::query::<MySql>(
-            r#"
-            DELETE FROM pipeline_step
-            WHERE group_id IN (
-                SELECT g.id FROM pipeline_group g
-                WHERE g.stage_id IN (
-                    SELECT s.id FROM pipeline_stage s
-                    WHERE s.process_id IN (
-                        SELECT p.id
-                        FROM pipeline_process p
-                        WHERE p.pipeline_id = ?
-                    )
-                )
-            )
-        "#,
-        )
-        .bind(pipeline_id.to_string().clone());
-        query_list.push(step_delete_query);
-
         // 删除 step_component
         let step_component_delete_query = sqlx::query::<MySql>(
             r#"
@@ -1137,7 +1086,59 @@ impl Pipeline {
             )
         "#,
         )
-        .bind(pipeline_id.to_string().clone());
+            .bind(pipeline_id.to_string().clone());
         query_list.push(step_component_delete_query);
+
+        // 删除 step
+        let step_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_step
+            WHERE group_id IN (
+                SELECT g.id FROM pipeline_group g
+                WHERE g.stage_id IN (
+                    SELECT s.id FROM pipeline_stage s
+                    WHERE s.process_id IN (
+                        SELECT p.id
+                        FROM pipeline_process p
+                        WHERE p.pipeline_id = ?
+                    )
+                )
+            )
+        "#,
+        )
+            .bind(pipeline_id.to_string().clone());
+        query_list.push(step_delete_query);
+
+
+        // 删除 group
+        let group_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_group
+            WHERE stage_id IN (
+                SELECT s.id FROM pipeline_stage s
+                WHERE s.process_id IN (
+                    SELECT p.id
+                    FROM pipeline_process p
+                    WHERE p.pipeline_id = ?
+                )
+            )
+        "#,
+        )
+        .bind(pipeline_id.to_string().clone());
+        query_list.push(group_delete_query);
+
+        // 删除 stage
+        let stage_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_stage
+            WHERE process_id IN (
+                SELECT p.id
+                FROM pipeline_process p
+                WHERE p.pipeline_id = ?
+            );
+        "#,
+        )
+            .bind(pipeline_id.to_string().clone());
+        query_list.push(stage_delete_query);
     }
 }

@@ -204,6 +204,8 @@ impl PipelineRunnable {
             }
         }
 
+        sql.push_str(" ORDER BY r.start_time DESC");
+
         let query = sqlx::query(&sql);
         let rows = DBHelper::execute_rows(query).await?;
         if rows.is_empty() {
