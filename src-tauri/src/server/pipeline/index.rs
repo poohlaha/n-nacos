@@ -32,7 +32,7 @@ pub struct Pipeline {
     pub(crate) server_id: String, // 服务器 ID
     #[serde(rename = "lastRunTime")]
     pub(crate) last_run_time: Option<String>, // 最后运行时间
-    pub(crate) last_run_id: Option<String>, // 最后运行流水线
+    pub(crate) last_run_id: Option<String>,    // 最后运行流水线
     pub(crate) tag: Option<PipelineTag>,       // 标签
     pub(crate) status: Option<PipelineStatus>, // 状态, 同步于 steps
 
@@ -395,10 +395,15 @@ impl Treat<HttpResponse> for Pipeline {
 
         // 查询运行详情
         if let Some(last_run_id) = &pipe.last_run_id {
-            let result = PipelineRunnable::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
-                status_list: vec![],
-                runtime_id: Some(last_run_id.clone()),
-            })).await?;
+            let result = PipelineRunnable::get_runtime_detail(
+                &pipeline,
+                true,
+                Some(PipelineRunnableQueryForm {
+                    status_list: vec![],
+                    runtime_id: Some(last_run_id.clone()),
+                }),
+            )
+            .await?;
             pipeline.runtime = result.runtime.clone();
         }
 
@@ -742,10 +747,15 @@ impl Pipeline {
                 let runnable_info = Self::get_runnable_variable(&basic, installed_commands.clone(), &node);
                 pipe.runnable_info = Some(runnable_info);
                 if let Some(last_run_id) = &pipe.last_run_id {
-                    let result = PipelineRunnable::get_runtime_detail(&pipe, true, Some(PipelineRunnableQueryForm {
-                        status_list: vec![],
-                        runtime_id: Some(last_run_id.clone()),
-                    })).await?;
+                    let result = PipelineRunnable::get_runtime_detail(
+                        &pipe,
+                        true,
+                        Some(PipelineRunnableQueryForm {
+                            status_list: vec![],
+                            runtime_id: Some(last_run_id.clone()),
+                        }),
+                    )
+                    .await?;
                     pipe.runtime = result.runtime;
                 }
             }
@@ -1054,7 +1064,7 @@ impl Pipeline {
             )
         "#,
         )
-            .bind(pipeline_id.to_string().clone());
+        .bind(pipeline_id.to_string().clone());
         query_list.push(step_component_delete_query);
 
         // 删除 step
@@ -1074,9 +1084,8 @@ impl Pipeline {
             )
         "#,
         )
-            .bind(pipeline_id.to_string().clone());
+        .bind(pipeline_id.to_string().clone());
         query_list.push(step_delete_query);
-
 
         // 删除 group
         let group_delete_query = sqlx::query::<MySql>(
@@ -1106,7 +1115,7 @@ impl Pipeline {
             );
         "#,
         )
-            .bind(pipeline_id.to_string().clone());
+        .bind(pipeline_id.to_string().clone());
         query_list.push(stage_delete_query);
     }
 }

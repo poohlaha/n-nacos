@@ -377,7 +377,7 @@ impl PipelineRunnable {
         if stage.stage_index > 0 || stage.group_index > 0 || stage.step_index > 0 {
             let runtime_id = props.id.clone().unwrap_or(String::new());
             if runtime_id.is_empty() {
-                return Ok(get_error_response("运行流水线失败, `runtime id` 为空"))
+                return Ok(get_error_response("运行流水线失败, `runtime id` 为空"));
             }
 
             return Self::retry(&pipeline, &runtime_id).await;
