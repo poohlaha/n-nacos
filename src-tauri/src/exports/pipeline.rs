@@ -43,7 +43,7 @@ pub async fn get_pipeline_list(server_id: String, form: QueryForm) -> Result<Htt
     let form_cloned = Arc::new(form.clone());
     Task::task_param_future::<Pipeline, _, _>(pipeline, |pipe| async move {
         let form_cloned = &*form_cloned.clone();
-        Pipeline::get_query_list(&*pipe, Some(form_cloned.clone())).await
+        Pipeline::get_query_list(&*pipe, Some(form_cloned.clone()), true).await
     })
     .await
 }

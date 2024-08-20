@@ -47,7 +47,7 @@ impl Pool {
             let mut pipeline = Pipeline::default();
             pipeline.id = runtime.pipeline_id.clone();
 
-            let pipeline_list = Pipeline::get_pipeline_list(&pipeline, None).await.unwrap_or_else(|err| {
+            let pipeline_list = Pipeline::get_pipeline_list(&pipeline, None, false).await.unwrap_or_else(|err| {
                 error!("get pipeline list error: {}", err);
                 Vec::new()
             });
@@ -222,7 +222,6 @@ impl Pool {
         let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
             runtime_id: None,
-            pipeline_id: None,
         }))
         .await?;
 

@@ -3,7 +3,6 @@
 pub(crate) mod stage;
 
 use crate::database::helper::DBHelper;
-use crate::error::Error;
 use crate::event::EventEmitter;
 use crate::helper::git::GitHandler;
 use crate::logger::pipeline::PipelineLogger;
@@ -19,6 +18,7 @@ use sqlx::query::Query;
 use sqlx::{MySql, Row};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -31,7 +31,12 @@ pub struct PipelineRunnable;
 pub struct PipelineRunnableQueryForm {
     pub(crate) status_list: Vec<String>,
     pub(crate) runtime_id: Option<String>,
-    pub(crate) pipeline_id: Option<String>,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct PipelineRuntimeResult {
+    pub(crate) runtime: Option<PipelineRuntime>,
+    pub(crate) runtime_list: Vec<PipelineRuntime>
 }
 
 impl PipelineRunnable {
@@ -39,20 +44,6 @@ impl PipelineRunnable {
     pub(crate) async fn delete_runtime(pipeline_id: &str) -> Result<HttpResponse, String> {
         let mut pipeline = Pipeline::default();
         pipeline.id = pipeline_id.to_string();
-
-        let response = Self::get_runtime_detail(
-            &pipeline,
-            true,
-            Some(PipelineRunnableQueryForm {
-                status_list: vec![],
-                runtime_id: None,
-                pipeline_id: Some(pipeline_id.to_string().clone()),
-            }),
-        )
-        .await?;
-        if response.code != 200 {
-            return Ok(response);
-        }
 
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline_runtime WHERE pipeline_id = ?").bind(pipeline_id));
@@ -88,7 +79,8 @@ impl PipelineRunnable {
 
     /// 获取运行历史记录
     pub(crate) async fn get_runtime_list(query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
-        Self::get_runtime_detail(&Pipeline::default(), false, query_form).await
+        let result = Self::get_runtime_detail(&Pipeline::default(), false, query_form).await?;
+        get_success_response_by_value(result.runtime_list)
     }
 
     /// 获取运行历史记录
@@ -101,11 +93,12 @@ impl PipelineRunnable {
             return Ok(get_error_response("查询历史记录失败, `serverId` 为空"));
         }
 
-        Self::get_runtime_detail(pipeline, false, None).await
+        let result = Self::get_runtime_detail(pipeline, false, None).await?;
+        get_success_response_by_value(result.runtime_list)
     }
 
     /// 获取运行详情
-    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline, only_one: bool, query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
+    pub(crate) async fn get_runtime_detail(pipeline: &Pipeline, only_one: bool, query_form: Option<PipelineRunnableQueryForm>) -> Result<PipelineRuntimeResult, String> {
         let mut sql = String::from("");
 
         // 取最新一条
@@ -193,19 +186,14 @@ impl PipelineRunnable {
 
             // runtime_id
             if let Some(runtime_id) = query_form.runtime_id.clone() {
-                sql.push_str(&format!(" r.id = '{}'", runtime_id));
-            }
-
-            // pipeline_id
-            if let Some(pipeline_id) = query_form.pipeline_id.clone() {
-                sql.push_str(&format!(" r.pipeline_id = '{}'", pipeline_id));
+                sql.push_str(&format!(" AND r.id = '{}'", runtime_id));
             }
         }
 
         let query = sqlx::query(&sql);
         let rows = DBHelper::execute_rows(query).await?;
         if rows.is_empty() {
-            return Ok(get_success_response(None));
+            return Ok(PipelineRuntimeResult::default());
         }
 
         // 组装数据
@@ -309,16 +297,22 @@ impl PipelineRunnable {
 
         let list: Vec<PipelineRuntime> = map.into_values().collect();
         if list.len() == 0 {
-            return Ok(get_success_response(None));
+            return Ok(PipelineRuntimeResult::default());
         }
 
         if only_one {
             if let Some(runtime) = list.get(0) {
-                return get_success_response_by_value(runtime.clone());
+               return Ok(PipelineRuntimeResult {
+                   runtime: Some(runtime.clone()),
+                   runtime_list: vec![],
+               })
             }
         }
 
-        return get_success_response_by_value(list);
+        return Ok(PipelineRuntimeResult {
+            runtime: None,
+            runtime_list: list
+        });
     }
 
     /// 添加到线程池中
@@ -337,7 +331,7 @@ impl PipelineRunnable {
 
         // 查询流水线是否存在
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None).await?;
+        let pipeline_list: Vec<Pipeline> = Pipeline::get_pipeline_list(&pipeline, None, false).await?;
         if pipeline_list.is_empty() {
             return Ok(get_error_response("运行流水线失败, 该流水线不存在"));
         }
@@ -347,23 +341,19 @@ impl PipelineRunnable {
         }
 
         // 查询流水线是不是在排队状态或执行状态
-        let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
+        info!("查询当前流水线是否在排队或执行状态...");
+        let result = PipelineRunnable::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
             status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
             runtime_id: None,
-            pipeline_id: None,
-        }))
-        .await?;
-        if response.code != 200 {
-            return Ok(response);
-        }
+        })).await?;
 
-        let runtime_list: Vec<PipelineRuntime> = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if runtime_list.len() > 0 {
+        if result.runtime.is_some() {
             return Ok(get_error_response("该流水线已在运行状态, 请等待运行完成"));
         }
 
         let pipe = pipeline_list.get(0).unwrap();
 
+        info!("query max order ...");
         // 查询 pipeline_runtime order
         let runtime_order_query = sqlx::query(
             r#"
@@ -477,24 +467,22 @@ impl PipelineRunnable {
         }
 
         // 查询数据, 并插入到线程池
-        let response = Self::get_runtime_detail(
+        let result = Self::get_runtime_detail(
             &pipeline,
             true,
             Some(PipelineRunnableQueryForm {
                 status_list: vec![],
                 runtime_id: Some(runtime_id.clone()),
-                pipeline_id: None,
             }),
         )
         .await?;
 
-        if response.code != 200 {
-            return Ok(response);
+        if result.runtime.is_none() {
+            return Ok(get_error_response("运行流水线失败, 查询运行数据失败"));
         }
 
-        let runtime: PipelineRuntime = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
         let mut pip = pipe.clone();
-        pip.runtime = Some(runtime);
+        pip.runtime = result.runtime;
         Pool::insert_into_pool(&pipe)?;
         Ok(get_success_response(None))
     }

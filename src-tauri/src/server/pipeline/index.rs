@@ -31,13 +31,6 @@ pub(crate) const PIPELINE_DB_NAME: &str = "pipeline";
 /// 存储流水线名称
 const PIPELINE_NAME: &str = "pipelines";
 
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-enum Body {
-    String(String),
-    PipelineRuntime(PipelineRuntime),
-}
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
     pub(crate) id: String,
@@ -273,7 +266,7 @@ impl Treat<HttpResponse> for Pipeline {
         }
 
         info!("update pipeline params: {:#?}", pipeline);
-        let response = Self::get_query_list(&pipeline, None).await?;
+        let response = Self::get_query_list(&pipeline, None, true).await?;
         if response.code != 200 {
             return Ok(response);
         }
@@ -437,7 +430,7 @@ impl Treat<HttpResponse> for Pipeline {
         }
 
         info!("get pipeline by id: {}, server_id: {}", &pipeline.id, &pipeline.server_id);
-        let response = Self::get_query_list(pipeline, None).await?;
+        let response = Self::get_query_list(pipeline, None, true).await?;
         if response.code != 200 {
             return Ok(response);
         }
@@ -451,19 +444,8 @@ impl Treat<HttpResponse> for Pipeline {
         let mut pipeline = pipe.clone();
 
         // 查询运行详情
-        let response = PipelineRunnable::get_runtime_detail(&pipeline, true, None).await?;
-        if response.code != 200 {
-            return Ok(response);
-        }
-
-        let result: Body = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-
-        let runtime = match result {
-            Body::String(_) => None,
-            Body::PipelineRuntime(runtime) => Some(runtime),
-        };
-
-        pipeline.runtime = runtime.clone();
+        let result = PipelineRunnable::get_runtime_detail(&pipeline, true, None).await?;
+        pipeline.runtime = result.runtime.clone();
 
         if let Some(mut runtime) = pipeline.runtime.clone() {
             let log = &runtime.log;
@@ -483,7 +465,7 @@ impl Treat<HttpResponse> for Pipeline {
 
 impl Pipeline {
     /// 根据条件查询列表
-    pub(crate) async fn get_query_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Result<HttpResponse, String> {
+    pub(crate) async fn get_query_list(pipeline: &Pipeline, query_form: Option<QueryForm>, need_get_child: bool) -> Result<HttpResponse, String> {
         let mut sql = String::from(
             r#"
             SELECT
@@ -797,14 +779,13 @@ impl Pipeline {
         // node 版本
         let node = Helper::get_cmd_version("node");
 
-        for pipe in list.iter_mut() {
-            let basic = &pipe.basic;
-            let runnable_info = Self::get_runnable_variable(&basic, installed_commands.clone(), &node);
-            pipe.runnable_info = Some(runnable_info);
-            let response = PipelineRunnable::get_runtime_detail(&pipe, true, None).await?;
-            if response.code == 200 {
-                let runtime: PipelineRuntime = serde_json::from_value(response.body.clone()).map_err(|err| Error::Error(err.to_string()).to_string())?;
-                pipe.runtime = Some(runtime);
+        if need_get_child {
+            for pipe in list.iter_mut() {
+                let basic = &pipe.basic;
+                let runnable_info = Self::get_runnable_variable(&basic, installed_commands.clone(), &node);
+                pipe.runnable_info = Some(runnable_info);
+                let result = PipelineRunnable::get_runtime_detail(&pipe, true, None).await?;
+                pipe.runtime = result.runtime;
             }
         }
 
@@ -1014,7 +995,7 @@ impl Pipeline {
     }
 
     /// 获取附加的 H5 变量
-    fn get_h5_runnable_variable(url: &str, installed_commands: Vec<String>, node: &str, branches: Vec<String>) -> Option<H5RunnableVariable> {
+    fn get_h5_runnable_variable(url: &str, installed_commands: Vec<String>, node: &str, _: Vec<String>) -> Option<H5RunnableVariable> {
         let mut variable = H5FileHandler::get_default_file_commands(url);
         if let Some(variables) = variable.as_mut() {
             variables.node = node.to_string();
@@ -1058,8 +1039,8 @@ impl Pipeline {
         }
     }
 
-    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline, query_form: Option<QueryForm>) -> Result<Vec<Pipeline>, String> {
-        let response = Pipeline::get_query_list(&pipeline, query_form).await?;
+    pub(crate) async fn get_pipeline_list(pipeline: &Pipeline, query_form: Option<QueryForm>, need_get_child: bool) -> Result<Vec<Pipeline>, String> {
+        let response = Pipeline::get_query_list(&pipeline, query_form, need_get_child).await?;
         if response.code != 200 {
             error!("get pipeline list error: {:#?}", response.error);
             return Ok(Vec::new());

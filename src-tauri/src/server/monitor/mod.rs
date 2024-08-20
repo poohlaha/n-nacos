@@ -154,7 +154,7 @@ impl Monitor {
             return Err(Error::convert_string(&msg));
         }
 
-        let func = |s: &str| {};
+        let func = |_: &str| {};
         let log_func = Arc::new(Mutex::new(func));
         // 连接服务器
         let session = SftpHandler::connect(&server, log_func.clone())?;
