@@ -12,7 +12,7 @@ use crate::server::pipeline::languages::h5::H5FileHandler;
 use crate::server::pipeline::props::{
     H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable,
 };
-use crate::server::pipeline::runnable::PipelineRunnable;
+use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use async_trait::async_trait;
 use handlers::utils::Utils;
 use log::{error, info};
@@ -32,6 +32,7 @@ pub struct Pipeline {
     pub(crate) server_id: String, // 服务器 ID
     #[serde(rename = "lastRunTime")]
     pub(crate) last_run_time: Option<String>, // 最后运行时间
+    pub(crate) last_run_id: Option<String>, // 最后运行流水线
     pub(crate) tag: Option<PipelineTag>,       // 标签
     pub(crate) status: Option<PipelineStatus>, // 状态, 同步于 steps
 
@@ -70,6 +71,7 @@ impl<'r> FromRow<'r, MySqlRow> for Pipeline {
             id: row.try_get("id")?,
             server_id: row.try_get("server_id")?,
             last_run_time: row.try_get("last_run_time")?,
+            last_run_id: row.try_get("last_run_id")?,
             tag,
             status: Some(PipelineStatus::get(&status_str)),
             create_time: row.try_get("create_time")?,
@@ -200,52 +202,6 @@ impl Treat<HttpResponse> for Pipeline {
         }
 
         return DBHelper::batch_commit(query_list).await;
-
-        // 设置运行时属性
-        /*
-        let mut run_variable = PipelineRunVariable::default();
-        let basic = &pipeline.basic;
-        run_variable.project_name = GitHandler::get_project_name_by_git(&basic.path); // 获取项目名称
-
-        // 当时运行流水线属性
-        let mut current = PipelineCurrentRun::default();
-
-        // stage
-        let mut stage = PipelineCurrentRunStage::default();
-        stage.status = Some(PipelineStatus::No);
-
-        // stages
-        current.stages = pipeline.process_config.stages.clone();
-        run_variable.current = current;
-        // pipeline_clone.run = Some(run_variable);
-
-        info!("insert pipeline params: {:#?}", pipeline_clone);
-
-        let data = Self::get_pipeline_list(&pipeline).await;
-        return match data {
-            Ok(mut data) => {
-                if data.is_empty() {
-                    data.push(pipeline_clone)
-                } else {
-                    // 查找名字是不是存在
-                    let line = data.iter().find(|s| {
-                        let b = &s.basic;
-                        return &b.name == &pipeline.basic.name;
-                    });
-
-                    // 找到相同记录
-                    if line.is_some() {
-                        return Ok(get_error_response("流水线名字已存在"));
-                    }
-
-                    data.push(pipeline_clone)
-                }
-
-                Database::update::<Pipeline>(PIPELINE_DB_NAME, &Self::get_pipeline_name(&pipeline.server_id), data, "保存流水线失败")
-            }
-            Err(_) => Ok(get_error_response("保存流水线失败")),
-        };
-         */
     }
 
     /// 更新
@@ -438,8 +394,13 @@ impl Treat<HttpResponse> for Pipeline {
         let mut pipeline = pipe.clone();
 
         // 查询运行详情
-        let result = PipelineRunnable::get_runtime_detail(&pipeline, true, None).await?;
-        pipeline.runtime = result.runtime.clone();
+        if let Some(last_run_id) = &pipe.last_run_id {
+            let result = PipelineRunnable::get_runtime_detail(&pipeline, true, Some(PipelineRunnableQueryForm {
+                status_list: vec![],
+                runtime_id: Some(last_run_id.clone()),
+            })).await?;
+            pipeline.runtime = result.runtime.clone();
+        }
 
         if let Some(mut runtime) = pipeline.runtime.clone() {
             let log = &runtime.log;
@@ -467,6 +428,7 @@ impl Pipeline {
                 p.server_id as pipeline_server_id,
                 p.tag_id as pipeline_tag_id,
                 p.last_run_time as pipeline_last_run_time,
+                p.last_run_id as pipeline_last_run_id,
                 p.`status` as pipeline_status,
                 p.create_time as pipeline_create_time,
                 p.update_time as pipeline_update_time,
@@ -612,6 +574,7 @@ impl Pipeline {
                 id: pipeline_id.to_string(),
                 server_id: row.try_get("pipeline_server_id").unwrap_or(String::new()),
                 last_run_time: row.try_get("pipeline_last_run_time").unwrap_or(None),
+                last_run_id: row.try_get("pipeline_last_run_id").unwrap_or(None),
                 tag,
                 status: Some(PipelineStatus::get(&status_str)),
                 basic,
@@ -778,8 +741,13 @@ impl Pipeline {
                 let basic = &pipe.basic;
                 let runnable_info = Self::get_runnable_variable(&basic, installed_commands.clone(), &node);
                 pipe.runnable_info = Some(runnable_info);
-                let result = PipelineRunnable::get_runtime_detail(&pipe, true, None).await?;
-                pipe.runtime = result.runtime;
+                if let Some(last_run_id) = &pipe.last_run_id {
+                    let result = PipelineRunnable::get_runtime_detail(&pipe, true, Some(PipelineRunnableQueryForm {
+                        status_list: vec![],
+                        runtime_id: Some(last_run_id.clone()),
+                    })).await?;
+                    pipe.runtime = result.runtime;
+                }
             }
         }
 

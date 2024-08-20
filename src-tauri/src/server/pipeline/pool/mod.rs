@@ -165,6 +165,8 @@ impl Pool {
         // 2. 更新 pipeline_runtime 中的状态为 Process
         // 3. 更新 pipeline_runtime 中的 start_time
         let mut query_list = Vec::new();
+        let runtime_id = task.runtime.clone().id.unwrap_or(String::new());
+
         let pipeline_query = sqlx::query::<MySql>(
             r#"
             UPDATE pipeline SET `status` = ?, last_run_time = ? WHERE id = ?
@@ -186,7 +188,7 @@ impl Pool {
             runtime_sql.push_str(&format!(", log = '{}'", log));
         }
 
-        runtime_sql.push_str(&format!("WHERE id = '{}'", task.runtime.clone().id.unwrap_or(String::new())));
+        runtime_sql.push_str(&format!("WHERE id = '{}'", &runtime_id));
 
         let runtime_query = sqlx::query::<MySql>(&runtime_sql).bind(PipelineStatus::got(status.clone())).bind(&start_time);
         query_list.push(runtime_query);

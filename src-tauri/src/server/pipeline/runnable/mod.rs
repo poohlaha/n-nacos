@@ -48,8 +48,8 @@ impl PipelineRunnable {
         pipeline.id = pipeline_id.to_string();
 
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
-        // 设置 pipeline 中的 status, last_run_time 为空
-        query_list.push(sqlx::query::<MySql>("UPDATE pipeline SET `status` = '', last_run_time = '' WHERE id = ?").bind(pipeline_id));
+        // 设置 pipeline 中的 status, last_run_time, last_run_id 为空
+        query_list.push(sqlx::query::<MySql>("UPDATE pipeline SET `status` = '', last_run_time = '', last_run_id = '' WHERE id = ?").bind(pipeline_id));
 
         // 删除 pipeline_runtime_variable
         let variable_sql = String::from(
@@ -360,7 +360,7 @@ impl PipelineRunnable {
             true,
             Some(PipelineRunnableQueryForm {
                 status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
-                runtime_id: None,
+                runtime_id: props.id.clone(),
             }),
         )
         .await?;
@@ -375,7 +375,12 @@ impl PipelineRunnable {
 
         // 错误阶段重试
         if stage.stage_index > 0 || stage.group_index > 0 || stage.step_index > 0 {
-            return Self::retry(&pipeline).await;
+            let runtime_id = props.id.clone().unwrap_or(String::new());
+            if runtime_id.is_empty() {
+                return Ok(get_error_response("运行流水线失败, `runtime id` 为空"))
+            }
+
+            return Self::retry(&pipeline, &runtime_id).await;
         }
 
         info!("query max order ...");
@@ -402,21 +407,22 @@ impl PipelineRunnable {
         // 插入到数据库
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         let stage = &props.stage;
+        let runtime_id = Uuid::new_v4().to_string();
         let create_time = Utils::get_date(None);
 
         // 更新 pipeline 表 status
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            UPDATE pipeline SET `status` = ?
+            UPDATE pipeline SET `status` = ?, last_run_id = ?
         "#,
         )
-        .bind(&status);
+        .bind(&status)
+        .bind(&runtime_id);
         query_list.push(pipeline_query);
 
         // 插入到 pipeline_runtime 表
         let basic_str = serde_json::to_string(&pipe.basic).unwrap_or(String::from(""));
         let stages_str = serde_json::to_string(&pipe.process_config.stages).unwrap_or(String::from(""));
-        let runtime_id = Uuid::new_v4().to_string();
         let process_query = sqlx::query::<MySql>(
             r#"
             INSERT INTO pipeline_runtime (
@@ -504,7 +510,7 @@ impl PipelineRunnable {
     }
 
     /// 错误阶段重试
-    async fn retry(pipeline: &Pipeline) -> Result<HttpResponse, String> {
+    async fn retry(pipeline: &Pipeline, runtime_id: &str) -> Result<HttpResponse, String> {
         let status = PipelineStatus::got(PipelineStatus::Queue); // 排队中
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
 
@@ -520,11 +526,11 @@ impl PipelineRunnable {
         // 更新 pipeline_runtime 表中的 status, start_time = '', duration = ''
         let runtime_query = sqlx::query::<MySql>(
             r#"
-                    UPDATE pipeline_runtime SET `status` = ?, start_time = '', duration = '' WHERE pipeline_id = ?
+                    UPDATE pipeline_runtime SET `status` = ?, start_time = '', duration = '' WHERE id = ?
                 "#,
         )
         .bind(&status)
-        .bind(&pipeline.id);
+        .bind(&runtime_id);
         query_list.push(runtime_query);
 
         let response = DBHelper::batch_commit(query_list).await?;
