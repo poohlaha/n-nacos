@@ -11,7 +11,7 @@
  Target Server Version : 80039 (8.0.39)
  File Encoding         : 65001
 
- Date: 20/08/2024 17:27:37
+ Date: 23/08/2024 15:53:58
 */
 
 SET NAMES utf8mb4;
@@ -56,7 +56,8 @@ DROP TABLE IF EXISTS `pipeline_group`;
 CREATE TABLE `pipeline_group` (
   `id` varchar(255) NOT NULL,
   `stage_id` varchar(255) DEFAULT NULL,
-  `title` varchar(255) DEFAULT NULL,
+  `label` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `order` int DEFAULT NULL,
   `create_time` varchar(255) DEFAULT NULL,
   `update_time` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
@@ -127,6 +128,7 @@ CREATE TABLE `pipeline_runtime_variable` (
   `order` int DEFAULT NULL,
   `name` varchar(255) DEFAULT NULL,
   `value` varchar(255) DEFAULT NULL,
+  `genre` varchar(255) DEFAULT NULL,
   `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '描述',
   `create_time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   `update_time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
@@ -178,6 +180,7 @@ DROP TABLE IF EXISTS `pipeline_step`;
 CREATE TABLE `pipeline_step` (
   `id` varchar(255) NOT NULL,
   `group_id` varchar(255) DEFAULT NULL,
+  `order` int DEFAULT NULL,
   `module` varchar(255) DEFAULT NULL,
   `command` varchar(255) DEFAULT NULL,
   `label` varchar(255) DEFAULT NULL,
@@ -194,9 +197,10 @@ DROP TABLE IF EXISTS `pipeline_step_component`;
 CREATE TABLE `pipeline_step_component` (
   `id` varchar(255) NOT NULL,
   `step_id` varchar(255) DEFAULT NULL,
+  `order` int DEFAULT NULL,
   `prop` varchar(255) DEFAULT NULL,
   `label` varchar(255) DEFAULT NULL,
-  `value` varchar(255) DEFAULT NULL,
+  `value` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
   `description` varchar(255) DEFAULT NULL,
   `create_time` varchar(255) DEFAULT NULL,
   `update_time` varchar(255) DEFAULT NULL,
@@ -229,6 +233,7 @@ INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `upda
 INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('6', 'Android', 'Android', 'volcano', '2024-08-07 10:40:24', NULL);
 INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('7', 'Ios', 'Ios', 'cyan', '2024-08-07 10:40:25', NULL);
 INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('8', 'H5', 'H5', 'success', '2024-08-07 10:40:26', NULL);
+INSERT INTO `pipeline_tag` (`id`, `name`, `value`, `color`, `create_time`, `update_time`) VALUES ('9', 'Docker-H5', 'DockerH5', 'magenta', '2024-08-07 10:40:27', NULL);
 COMMIT;
 
 -- ----------------------------
@@ -248,7 +253,6 @@ CREATE TABLE `pipeline_variable` (
   `create_time` varchar(255) DEFAULT NULL,
   `update_time` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 
 -- ----------------------------
 -- Table structure for server
