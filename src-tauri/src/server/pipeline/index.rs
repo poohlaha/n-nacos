@@ -9,9 +9,7 @@ use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{
-    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable,
-};
+use crate::server::pipeline::props::{H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable};
 use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use async_trait::async_trait;
 use handlers::utils::Utils;
@@ -451,16 +449,18 @@ impl Pipeline {
                 s.update_time as process_update_time,
                 e.id as stage_id,
                 e.process_id as stage_process_id,
-		        CAST(e.`order` AS UNSIGNED) as stage_order,
+                CAST(e.`order` AS UNSIGNED) as stage_order,
                 e.create_time as stage_create_time,
                 e.update_time as stage_update_time,
                 g.id as group_id,
                 g.stage_id as group_stage_id,
-                g.title as group_title,
+                CAST(g.`order` AS UNSIGNED) as group_order,
+                g.label as group_label,
                 g.create_time as group_create_time,
                 g.update_time as group_update_time,
                 sp.id as step_id,
                 sp.group_id as step_group_id,
+                CAST(sp.`order` AS UNSIGNED) as step_order,
                 sp.module as step_module,
                 sp.command as step_command,
                 sp.label as step_label,
@@ -480,12 +480,13 @@ impl Pipeline {
                 v.update_time as variable_update_time,
                 c.id as step_component_id,
                 c.step_id as step_component_step_id,
+                CAST(c.`order` AS UNSIGNED) as step_component_order,
                 c.prop as step_component_prop,
                 c.label as step_component_label,
-		        c.description as step_component_description,
+                c.description as step_component_description,
                 c.`value` as step_component_value,
                 c.create_time as step_component_create_time,
-		        c.update_time as step_component_update_time
+                c.update_time as step_component_update_time
             FROM
                  pipeline p
             LEFT JOIN pipeline_variable v on v.pipeline_id = p.id
@@ -633,7 +634,8 @@ impl Pipeline {
             group_map.entry(group_id.clone()).or_insert_with(|| PipelineGroup {
                 id: group_id.to_string(),
                 stage_id: row.try_get("group_stage_id").unwrap_or(String::new()),
-                title: row.try_get("group_title").unwrap_or(String::new()),
+                label: row.try_get("group_label").unwrap_or(String::new()),
+                order: row.try_get("group_order").unwrap_or(0),
                 steps: vec![],
                 create_time: row.try_get("group_create_time").unwrap_or(None),
                 update_time: row.try_get("group_update_time").unwrap_or(None),
@@ -643,9 +645,11 @@ impl Pipeline {
             let step_id = row.try_get("step_id").unwrap_or(String::new());
             let step_status_str: String = row.try_get("step_status").unwrap_or(String::new());
             let step_module_str: String = row.try_get("step_module").unwrap_or(String::new());
+            // let step_docker_str: String = row.try_get("step_docker").unwrap_or(String::new());
             step_map.entry(step_id.clone()).or_insert_with(|| PipelineStep {
                 id: step_id.to_string(),
                 group_id: row.try_get("step_group_id").unwrap_or(String::new()),
+                order: row.try_get("step_order").unwrap_or(0),
                 module: PipelineCommandStatus::get(&step_module_str),
                 command: row.try_get("step_command").unwrap_or(String::new()),
                 label: row.try_get("step_label").unwrap_or(String::new()),
@@ -660,6 +664,7 @@ impl Pipeline {
             step_component_map.entry(step_component_id.clone()).or_insert_with(|| PipelineStepComponent {
                 id: step_component_id.to_string(),
                 step_id: row.try_get("step_component_step_id").unwrap_or(String::new()),
+                order: row.try_get("step_component_order").unwrap_or(0),
                 prop: row.try_get("step_component_prop").unwrap_or(String::new()),
                 label: row.try_get("step_component_label").unwrap_or(String::new()),
                 description: row.try_get("step_component_description").unwrap_or(String::new()),
@@ -774,12 +779,13 @@ impl Pipeline {
                 let step_component_id = Uuid::new_v4().to_string();
                 let step_component_query = sqlx::query::<MySql>(
                     r#"
-                            INSERT INTO pipeline_step_component (id, step_id, prop, label, `value`, description, create_time, update_time)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO pipeline_step_component (id, step_id, `order`, prop, label, `value`, description, create_time, update_time)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         "#,
                 )
                 .bind(step_component_id.clone())
                 .bind(step_id.clone())
+                 .bind(format!("{}", component.order))
                 .bind(component.prop.clone())
                 .bind(component.label.clone())
                 .bind(component.value.clone())
@@ -795,17 +801,19 @@ impl Pipeline {
                 return;
             }
 
-            for step in steps.iter() {
+            for (usize, step) in steps.iter().enumerate() {
                 let step_id = Uuid::new_v4().to_string();
                 let step_query = sqlx::query::<MySql>(
                     r#"
-            INSERT INTO pipeline_step (id, group_id, module, command, label, `status`, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pipeline_step (id, group_id, `order`, module, command, label, `status`, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(step_id.clone())
                 .bind(group_id.clone())
+                .bind(format!("{}", usize as u32 + 1))
                 .bind(PipelineCommandStatus::got(step.module.clone()))
+                // .bind(PipelineDockerCommand::got(step.docker.clone().unwrap_or(PipelineDockerCommand::default())))
                 .bind(step.command.clone())
                 .bind(step.label.clone())
                 .bind(PipelineStatus::got(step.status.clone()))
@@ -823,17 +831,18 @@ impl Pipeline {
                 return;
             }
 
-            for group in groups.iter() {
+            for (usize, group) in groups.iter().enumerate() {
                 let group_id = Uuid::new_v4().to_string();
                 let group_query = sqlx::query::<MySql>(
                     r#"
-            INSERT INTO pipeline_group (id, stage_id, title, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO pipeline_group (id, stage_id, `order`, label, create_time, update_time)
+            VALUES (?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(group_id.clone())
                 .bind(stage_id.clone())
-                .bind(group.title.clone())
+                .bind(format!("{}", usize as u32 + 1))
+                .bind(group.label.clone())
                 .bind(create_time.clone())
                 .bind(group.update_time.clone());
                 query_list.push(group_query);
@@ -867,7 +876,7 @@ impl Pipeline {
     }
 
     fn insert_variables(pipeline_id: String, create_time: String, update_time: Option<String>, variables: &Vec<PipelineVariable>, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
-        for variable in variables.iter() {
+        for (usize, variable) in variables.iter().enumerate() {
             let variable_query = sqlx::query::<MySql>(
                 r#"
             INSERT INTO pipeline_variable (
@@ -877,7 +886,7 @@ impl Pipeline {
             )
             .bind(Uuid::new_v4().to_string().clone())
             .bind(pipeline_id.clone())
-            .bind(variable.order.clone())
+            .bind(format!("{}", usize as u32 + 1))
             .bind(variable.name.clone())
             .bind(variable.genre.clone())
             .bind(variable.value.clone())
@@ -950,6 +959,9 @@ impl Pipeline {
             PipelineTag::Android => {}
             PipelineTag::Ios => {}
             PipelineTag::H5 => {
+                h5_variable = Self::get_h5_runnable_variable(&basic.path, installed_commands, &node, branches.clone());
+            },
+            PipelineTag::DockerH5 => {
                 h5_variable = Self::get_h5_runnable_variable(&basic.path, installed_commands, &node, branches.clone());
             }
         }
@@ -1035,7 +1047,7 @@ impl Pipeline {
     }
 
     pub(crate) fn delete_by_pipeline(pipeline_id: &str, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
-        // 删除 variables 并重新插入
+        // 删除 pipeline_variable
         let variable_delete_query = sqlx::query::<MySql>(
             r#"
             DELETE FROM pipeline_variable WHERE pipeline_id = ?
@@ -1043,6 +1055,24 @@ impl Pipeline {
         )
         .bind(pipeline_id.to_string().clone());
         query_list.push(variable_delete_query);
+
+        // 删除 pipeline_basic
+        let basic_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_basic WHERE pipeline_id = ?
+        "#,
+        )
+            .bind(pipeline_id.to_string().clone());
+        query_list.push(basic_delete_query);
+
+        // 删除 pipeline_process
+        let process_delete_query = sqlx::query::<MySql>(
+            r#"
+            DELETE FROM pipeline_process WHERE pipeline_id = ?
+        "#,
+        )
+            .bind(pipeline_id.to_string().clone());
+        query_list.push(process_delete_query);
 
         // 删除 step_component
         let step_component_delete_query = sqlx::query::<MySql>(

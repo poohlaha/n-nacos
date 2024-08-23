@@ -1,6 +1,7 @@
 //! 流水线运行
 
 pub(crate) mod stage;
+mod docker;
 
 use crate::database::helper::DBHelper;
 use crate::database::interface::Treat;
@@ -167,6 +168,7 @@ impl PipelineRunnable {
                     CAST( v.`order` AS UNSIGNED ) AS runtime_variable_order,
                     v.`name` as runtime_variable_name,
                     v.`value` as runtime_variable_value,
+                    v.genre as runtime_variable_genre,
                     v.description as runtime_variable_description,
                     v.create_time as runtime_variable_create_time,
                     v.update_time as runtime_variable_update_time
@@ -279,6 +281,7 @@ impl PipelineRunnable {
                 order: row.try_get("runtime_variable_order").unwrap_or(0),
                 name: row.try_get("runtime_variable_name").unwrap_or(String::new()),
                 value: row.try_get("runtime_variable_value").unwrap_or(String::new()),
+                genre: row.try_get("runtime_variable_genre").unwrap_or(String::new()),
                 description: row.try_get("runtime_variable_description").unwrap_or(String::new()),
                 create_time: row.try_get("runtime_variable_create_time").unwrap_or(None),
                 update_time: row.try_get("runtime_variable_update_time").unwrap_or(None),
@@ -475,8 +478,8 @@ impl PipelineRunnable {
                 let variable_query = sqlx::query::<MySql>(
                     r#"
             INSERT INTO pipeline_runtime_variable (
-                id, snapshot_id, `order`, name, `value`, description, create_time, update_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                id, snapshot_id, `order`, name, `value`, genre, description, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(Uuid::new_v4().to_string())
@@ -484,6 +487,7 @@ impl PipelineRunnable {
                 .bind(&variable.order)
                 .bind(&variable.name)
                 .bind(&variable.value)
+                .bind(&variable.genre)
                 .bind(&variable.description)
                 .bind(&create_time)
                 .bind("");

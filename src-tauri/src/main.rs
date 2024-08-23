@@ -37,6 +37,8 @@ pub(crate) const MAX_THREAD_COUNT: u32 = 4;
 pub(crate) const MAX_DATABASE_COUNT: u32 = 5;
 pub(crate) const LOOP_SEC: u64 = 10;
 
+const DATABASE_URL: &str = "mysql://root:123456@localhost/nacos";
+
 // 定义全局 线程池
 lazy_static! {
     static ref POOLS: Arc<Mutex<Vec<PipelineStageTask>>> = Arc::new(Mutex::new(Vec::new()));

@@ -10,7 +10,7 @@ use crate::prepare::{convert_res, get_error_response, get_success_response_by_va
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
 use log::{error, info};
 use sftp::config::Upload;
@@ -21,16 +21,17 @@ use std::sync::Arc;
 // use images_compressor::factor::Factor;
 use minimize::minify::Minimize;
 use tauri::AppHandle;
+use crate::server::pipeline::runnable::docker::DockerHandler;
 
 const DIR_NAME: &str = "projects";
 
 pub struct PipelineRunnableStage;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct PipelineRunnableResult {
-    success: bool,
-    msg: String,
-    pipeline: Option<Pipeline>,
+    pub(crate) success: bool,
+    pub(crate) msg: String,
+    pub(crate) pipeline: Option<Pipeline>,
 }
 
 impl PipelineRunnableStage {
@@ -211,6 +212,7 @@ impl PipelineRunnableStage {
             PipelineCommandStatus::Minimize => Self::exec_step_minimize(app, &pipeline, stage).await,
             PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, stage).await,
             PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, stage).await,
+            PipelineCommandStatus::Docker => Self::exec_step_docker(app, &pipeline, stage),
             PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, stage).await,
         };
     }
@@ -346,6 +348,7 @@ impl PipelineRunnableStage {
             PipelineTag::Android => {}
             PipelineTag::Ios => {}
             PipelineTag::H5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step).await,
+            PipelineTag::DockerH5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step).await
         }
 
         Ok(PipelineRunnableResult::default())
@@ -430,7 +433,7 @@ impl PipelineRunnableStage {
                 args.dir = String::from("build")
             }
 
-            args.dir = Self::get_deploy_dir(pipeline, &args.dir, stage_step, &pack_name)?;
+            args.dir = Self::get_deploy_path(pipeline, &args.dir, stage_step, &pack_name)?;
             PipelineRunnable::save_log(app, &format!("exec minimize step args: {:#?} ...", args), &pipeline.server_id, &pipeline.id, order);
 
             if needed {
@@ -644,32 +647,11 @@ impl PipelineRunnableStage {
         server.id = pipeline.server_id.clone();
 
         // 取 deployDir,默认为 build 目录
-        let mut deploy_dir = String::from("");
+        let deploy_dir = Self::get_deploy_dir(&stage_step, &snapshot);
         let mut server_dir = String::new();
+
         let components = &stage_step.step.components;
         if components.len() > 0 {
-            let component = components.iter().find(|com| com.prop.as_str() == "deployDir");
-            if let Some(component) = component {
-                if !component.value.is_empty() {
-                    deploy_dir = component.value.clone();
-                    info!("exec step deploy found deploy_dir in components: {}", deploy_dir);
-                }
-            }
-
-            // 没有找到去 selected_variables 中查找
-            if deploy_dir.is_empty() {
-                let dir = Self::get_value_from_variables(&snapshot.runnable_variables, "deployDir");
-                if !dir.is_empty() {
-                    info!("exec step deploy found deploy_dir in runnable variables: {}", deploy_dir);
-                    deploy_dir = dir;
-                }
-            }
-
-            // 都未找到, 直接设置默认值
-            if deploy_dir.is_empty() {
-                deploy_dir = String::from("build");
-            }
-
             let component = components.iter().find(|com| com.prop.as_str() == "serverDir");
             if let Some(component) = component {
                 server_dir = component.value.clone()
@@ -677,7 +659,7 @@ impl PipelineRunnableStage {
         }
 
         // 判断 deploy_dir 是不是绝对路径
-        let build_dir = Self::get_deploy_dir(pipeline, &deploy_dir, stage_step, &pack_name)?;
+        let build_dir = Self::get_deploy_path(pipeline, &deploy_dir, stage_step, &pack_name)?;
         let response = Server::get_by_id(&Server {
             id: pipeline.server_id.clone(),
             ..Default::default()
@@ -741,6 +723,15 @@ impl PipelineRunnableStage {
         };
     }
 
+    /// docker
+    fn exec_step_docker(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
+        let step = &stage_step.step;
+        let pack_name = &format!("【{}】", &step.label);
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let order = runtime.order.unwrap_or(1);
+        PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
+        return DockerHandler::exec(app, pipeline, stage_step)
+    }
     /// 发送通知
     async fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
@@ -1046,7 +1037,7 @@ impl PipelineRunnableStage {
     }
 
     /// 从选中的 variables 取值
-    fn get_value_from_variables(variables: &Vec<PipelineRuntimeVariable>, prop_name: &str) -> String {
+    pub(crate) fn get_value_from_variables(variables: &Vec<PipelineRuntimeVariable>, prop_name: &str) -> String {
         if variables.is_empty() {
             return String::new();
         }
@@ -1101,7 +1092,7 @@ impl PipelineRunnableStage {
     }
 
     /// 获取发布目录
-    fn get_deploy_dir(pipeline: &Pipeline, deploy_dir: &str, stage_step: &PipelineRunnableStageStep, pack_name: &str) -> Result<String, String> {
+    fn get_deploy_path(pipeline: &Pipeline, deploy_dir: &str, stage_step: &PipelineRunnableStageStep, pack_name: &str) -> Result<String, String> {
         info!("exec step deploy, deploy dir: {}", deploy_dir);
         let mut build_dir: String = String::new();
         if Path::new(&deploy_dir).is_absolute() {
@@ -1126,5 +1117,35 @@ impl PipelineRunnableStage {
         }
 
         return Ok(build_dir);
+    }
+
+    pub(crate) fn get_deploy_dir(stage_step: &PipelineRunnableStageStep, snapshot: &PipelineRuntimeSnapshot) -> String {
+        let mut deploy_dir = String::from("");
+        let components = &stage_step.step.components;
+        if components.len() > 0 {
+            let component = components.iter().find(|com| com.prop.as_str() == "deployDir");
+            if let Some(component) = component {
+                if !component.value.is_empty() {
+                    deploy_dir = component.value.clone();
+                    info!("exec step deploy found deploy_dir in components: {}", deploy_dir);
+                }
+            }
+
+            // 没有找到去 selected_variables 中查找
+            if deploy_dir.is_empty() {
+                let dir = Self::get_value_from_variables(&snapshot.runnable_variables, "deployDir");
+                if !dir.is_empty() {
+                    info!("exec step deploy found deploy_dir in runnable variables: {}", deploy_dir);
+                    deploy_dir = dir;
+                }
+            }
+
+            // 都未找到, 直接设置默认值
+            if deploy_dir.is_empty() {
+                deploy_dir = String::from("build");
+            }
+        }
+
+        return deploy_dir;
     }
 }

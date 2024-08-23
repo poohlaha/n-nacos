@@ -1,10 +1,9 @@
 //! 本地 sled 存储
 
 use crate::error::Error;
-use crate::{DATABASE_POOLS, MAX_DATABASE_COUNT};
+use crate::{DATABASE_POOLS, DATABASE_URL, MAX_DATABASE_COUNT};
 use dotenvy::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
-use std::env;
 
 pub(crate) mod helper;
 pub(crate) mod interface;
@@ -17,12 +16,12 @@ impl Database {
         let mut pipeline_db = DATABASE_POOLS.lock().unwrap();
         if pipeline_db.is_none() {
             dotenv().ok();
-            let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
+            // let url = env::var("DATABASE_URL").expect(&format!("`DATABASE_URL` not in `.env` file"));
             let database_pool = MySqlPoolOptions::new()
                 .max_connections(MAX_DATABASE_COUNT)
-                .connect(&url)
+                .connect(DATABASE_URL)
                 .await
-                .map_err(|err| Error::Error(format!("connect to {url} error: {:#?} !", err)).to_string())?;
+                .map_err(|err| Error::Error(format!("connect to {DATABASE_URL} error: {:#?} !", err)).to_string())?;
             *pipeline_db = Some(database_pool)
         }
 

@@ -59,7 +59,8 @@ pub struct PipelineGroup {
     pub(crate) id: String,
     #[serde(rename = "stageId")]
     pub(crate) stage_id: String,
-    pub(crate) title: String,
+    pub(crate) label: String,
+    pub(crate) order: u32,
     pub(crate) steps: Vec<PipelineStep>,
     #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>,
@@ -73,6 +74,7 @@ pub struct PipelineStep {
     pub(crate) id: String,
     #[serde(rename = "groupId")]
     pub(crate) group_id: String,
+    pub(crate) order: u32,
     pub(crate) module: PipelineCommandStatus,
     pub(crate) command: String,
     pub(crate) label: String,
@@ -90,6 +92,7 @@ pub struct PipelineStepComponent {
     pub(crate) id: String,
     #[serde(rename = "stepId")]
     pub(crate) step_id: String,
+    pub(crate) order: u32,
     pub(crate) prop: String,
     pub(crate) label: String,
     #[serde(rename = "desc")]
@@ -111,6 +114,7 @@ pub enum PipelineCommandStatus {
     Minimize,  // 文件压缩
     Compress,  // 图片压缩
     Deploy,    // 项目部署
+    Docker,    // Docker
     Notice,    // 发送通知
 }
 
@@ -150,6 +154,10 @@ impl PipelineCommandStatus {
             return PipelineCommandStatus::Deploy;
         }
 
+        if status == "Docker" {
+            return PipelineCommandStatus::Docker;
+        }
+
         if status == "Notice" {
             return PipelineCommandStatus::Notice;
         }
@@ -166,7 +174,51 @@ impl PipelineCommandStatus {
             PipelineCommandStatus::Minimize => "Minimize".to_string(),
             PipelineCommandStatus::Compress => "Compress".to_string(),
             PipelineCommandStatus::Deploy => "Deploy".to_string(),
+            PipelineCommandStatus::Docker => "Docker".to_string(),
             PipelineCommandStatus::Notice => "Notice".to_string(),
+        };
+    }
+}
+
+// Docker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub enum PipelineDockerCommand {
+    None,
+    DockerConfig,   // Docker config
+    DockerPullNginx, // Docker pull nginx
+    DockerPush,  // Docker Push
+}
+
+impl Default for PipelineDockerCommand {
+    fn default() -> Self {
+        PipelineDockerCommand::None
+    }
+}
+
+impl PipelineDockerCommand {
+    pub fn get(status: &str) -> PipelineDockerCommand {
+        if status == "DockerConfig" {
+            return PipelineDockerCommand::DockerConfig;
+        }
+
+        if status == "DockerPullNginx" {
+            return PipelineDockerCommand::DockerPullNginx;
+        }
+
+        if status == "DockerPush" {
+            return PipelineDockerCommand::DockerPush;
+        }
+
+        PipelineDockerCommand::None
+    }
+
+    pub fn got(status: PipelineDockerCommand) -> String {
+        return match status {
+            PipelineDockerCommand::None => "None".to_string(),
+            PipelineDockerCommand::DockerConfig => "DockerConfig".to_string(),
+            PipelineDockerCommand::DockerPullNginx => "DockerPullNginx".to_string(),
+            PipelineDockerCommand::DockerPush => "DockerPush".to_string(),
         };
     }
 }
@@ -199,7 +251,7 @@ pub struct PipelineVariable {
 
 impl PipelineVariable {
     pub fn is_empty(variable: &PipelineVariable) -> bool {
-        return variable.name.is_empty() || variable.genre.is_empty() || variable.value.is_empty() || variable.disabled.is_empty() || variable.require.is_empty();
+        return variable.name.is_empty() || variable.genre.is_empty() || variable.disabled.is_empty() || variable.require.is_empty();
     }
 }
 
@@ -412,6 +464,7 @@ pub struct PipelineRuntimeVariable {
     pub(crate) order: u32, // 顺序
     pub(crate) name: String,
     pub(crate) value: String,
+    pub(crate) genre: String,
     #[serde(rename = "desc")]
     pub(crate) description: String,
     #[serde(rename = "createTime")]
@@ -432,6 +485,7 @@ pub enum PipelineTag {
     Android,
     Ios,
     H5,
+    DockerH5
 }
 
 impl Default for PipelineTag {
@@ -452,6 +506,7 @@ impl PipelineTag {
             PipelineTag::Android => false,
             PipelineTag::Ios => false,
             PipelineTag::H5 => false,
+            PipelineTag::DockerH5 => false,
         };
     }
 
@@ -492,6 +547,10 @@ impl PipelineTag {
             return PipelineTag::H5;
         }
 
+        if tag == "DockerH5" {
+            return PipelineTag::DockerH5;
+        }
+
         PipelineTag::None
     }
 
@@ -506,6 +565,7 @@ impl PipelineTag {
             PipelineTag::Android => "Android".to_string(),
             PipelineTag::Ios => "Ios".to_string(),
             PipelineTag::H5 => "H5".to_string(),
+            PipelineTag::DockerH5 => "DockerH5".to_string(),
         };
     }
 }

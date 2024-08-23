@@ -80,7 +80,8 @@ impl Treat<HttpResponse> for Server {
     /// 获取 服务器列表
     async fn get_list(_: &Self::B) -> Result<HttpResponse, String> {
         let query = sqlx::query_as::<_, Server>(
-            "SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
+            // "SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY CASE WHEN update_time IS NULL THEN 0 ELSE 1 END DESC, update_time DESC, create_time DESC",
+            "SELECT id, ip, CAST(port AS UNSIGNED) AS port, account, pwd, name, description, create_time, update_time FROM server ORDER BY create_time DESC",
         );
         return DBHelper::execute_query(query).await;
     }
