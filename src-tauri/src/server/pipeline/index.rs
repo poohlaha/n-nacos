@@ -9,7 +9,9 @@ use crate::helper::index::Helper;
 use crate::logger::pipeline::PipelineLogger;
 use crate::prepare::{get_error_response, get_success_response, get_success_response_by_value, HttpResponse};
 use crate::server::pipeline::languages::h5::H5FileHandler;
-use crate::server::pipeline::props::{H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable};
+use crate::server::pipeline::props::{
+    H5RunnableVariable, OsCommands, PipelineBasic, PipelineCommandStatus, PipelineGroup, PipelineProcess, PipelineRuntime, PipelineStage, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag, PipelineVariable, RunnableVariable,
+};
 use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use async_trait::async_trait;
 use handlers::utils::Utils;
@@ -785,7 +787,7 @@ impl Pipeline {
                 )
                 .bind(step_component_id.clone())
                 .bind(step_id.clone())
-                 .bind(format!("{}", component.order))
+                .bind(format!("{}", component.order))
                 .bind(component.prop.clone())
                 .bind(component.label.clone())
                 .bind(component.value.clone())
@@ -960,7 +962,7 @@ impl Pipeline {
             PipelineTag::Ios => {}
             PipelineTag::H5 => {
                 h5_variable = Self::get_h5_runnable_variable(&basic.path, installed_commands, &node, branches.clone());
-            },
+            }
             PipelineTag::DockerH5 => {
                 h5_variable = Self::get_h5_runnable_variable(&basic.path, installed_commands, &node, branches.clone());
             }
@@ -1062,7 +1064,7 @@ impl Pipeline {
             DELETE FROM pipeline_basic WHERE pipeline_id = ?
         "#,
         )
-            .bind(pipeline_id.to_string().clone());
+        .bind(pipeline_id.to_string().clone());
         query_list.push(basic_delete_query);
 
         // 删除 pipeline_process
@@ -1071,7 +1073,7 @@ impl Pipeline {
             DELETE FROM pipeline_process WHERE pipeline_id = ?
         "#,
         )
-            .bind(pipeline_id.to_string().clone());
+        .bind(pipeline_id.to_string().clone());
         query_list.push(process_delete_query);
 
         // 删除 step_component

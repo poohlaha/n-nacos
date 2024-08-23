@@ -185,9 +185,9 @@ impl PipelineCommandStatus {
 #[allow(dead_code)]
 pub enum PipelineDockerCommand {
     None,
-    DockerConfig,   // Docker config
+    DockerConfig,    // Docker config
     DockerPullNginx, // Docker pull nginx
-    DockerPush,  // Docker Push
+    DockerPush,      // Docker Push
 }
 
 impl Default for PipelineDockerCommand {
@@ -485,7 +485,7 @@ pub enum PipelineTag {
     Android,
     Ios,
     H5,
-    DockerH5
+    DockerH5,
 }
 
 impl Default for PipelineTag {

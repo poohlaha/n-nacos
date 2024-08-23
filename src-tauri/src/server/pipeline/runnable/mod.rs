@@ -1,7 +1,7 @@
 //! 流水线运行
 
-pub(crate) mod stage;
 mod docker;
+pub(crate) mod stage;
 
 use crate::database::helper::DBHelper;
 use crate::database::interface::Treat;

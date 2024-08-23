@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 // use images_compressor::compressor::{Compressor, CompressorArgs};
 // use images_compressor::factor::Factor;
+use crate::server::pipeline::runnable::docker::DockerHandler;
 use minimize::minify::Minimize;
 use tauri::AppHandle;
-use crate::server::pipeline::runnable::docker::DockerHandler;
 
 const DIR_NAME: &str = "projects";
 
@@ -348,7 +348,7 @@ impl PipelineRunnableStage {
             PipelineTag::Android => {}
             PipelineTag::Ios => {}
             PipelineTag::H5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step).await,
-            PipelineTag::DockerH5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step).await
+            PipelineTag::DockerH5 => return Self::exec_step_h5_pack(app, &pipeline, installed_commands.clone(), &dir, step).await,
         }
 
         Ok(PipelineRunnableResult::default())
@@ -730,7 +730,7 @@ impl PipelineRunnableStage {
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
         let order = runtime.order.unwrap_or(1);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
-        return DockerHandler::exec(app, pipeline, stage_step)
+        return DockerHandler::exec(app, pipeline, stage_step);
     }
     /// 发送通知
     async fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {

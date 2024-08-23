@@ -1,19 +1,19 @@
 //! Docker, 可以使用第三方库 `bollard`
 
-use std::path::Path;
-use std::sync::Arc;
+use crate::error::Error;
+use crate::helper::index::Helper;
+use crate::server::pipeline::index::Pipeline;
+use crate::server::pipeline::props::{PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineStepComponent};
+use crate::server::pipeline::runnable::stage::{PipelineRunnableResult, PipelineRunnableStage};
+use crate::server::pipeline::runnable::PipelineRunnable;
 use handlers::command::CommandHandler;
 use handlers::file::FileHandler;
 use handlers::utils::Utils;
 use log::{error, info};
 use regex::Regex;
+use std::path::Path;
+use std::sync::Arc;
 use tauri::AppHandle;
-use crate::error::Error;
-use crate::helper::index::Helper;
-use crate::server::pipeline::index::Pipeline;
-use crate::server::pipeline::props::{PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineStepComponent};
-use crate::server::pipeline::runnable::PipelineRunnable;
-use crate::server::pipeline::runnable::stage::{PipelineRunnableResult, PipelineRunnableStage};
 
 pub struct DockerHandler;
 
@@ -29,21 +29,20 @@ pub struct DockerConfig {
     need_push: String,
     nginx_path: String,
     nginx_content: String,
-    platform: String
+    platform: String,
 }
 
 impl DockerConfig {
     pub fn is_empty(config: &DockerConfig) -> bool {
         if config.need_push == "Yes" {
-            return config.dockerfile.is_empty() || config.image.is_empty() || config.address.is_empty() || config.namespace.is_empty() || config.user.is_empty() || config.password.is_empty()
+            return config.dockerfile.is_empty() || config.image.is_empty() || config.address.is_empty() || config.namespace.is_empty() || config.user.is_empty() || config.password.is_empty();
         }
 
-        return config.dockerfile.is_empty() || config.image.is_empty()
+        return config.dockerfile.is_empty() || config.image.is_empty();
     }
 }
 
 impl DockerHandler {
-
     pub(crate) fn exec(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         // let step = stage_step.step.clone();
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
@@ -61,7 +60,7 @@ impl DockerHandler {
         }
 
         let basic = basic.clone().unwrap();
-        let docker_config =  Self::exec_docker_config(pipeline, stage_step, snapshot);
+        let docker_config = Self::exec_docker_config(pipeline, stage_step, snapshot);
         info!("docker config: {:#?}", docker_config);
 
         if DockerConfig::is_empty(&docker_config) {
@@ -88,7 +87,7 @@ impl DockerHandler {
         let deploy_dir = PipelineRunnableStage::get_deploy_dir(&stage_step, &snapshot);
 
         // 创建 nginx.conf 文件
-        let nginx_file_name =  format!("nginx_{}.conf", time); // nginx 文件名
+        let nginx_file_name = format!("nginx_{}.conf", time); // nginx 文件名
         let nginx_file_path = Path::new(&basic.path).join(&nginx_file_name);
         let nginx_file_path_str = nginx_file_path.to_string_lossy().to_string();
         FileHandler::write_to_file_when_clear(&nginx_file_path_str, &docker_config.nginx_content)?;
@@ -125,7 +124,10 @@ impl DockerHandler {
             commands.push(format!("docker push {}", cmd));
         } else {
             // 不需要推送，直接打本地包
-            commands.push(format!("docker buildx build -f ./{} -t {}:{} --platform {} -o type=docker .", dockerfile_file_name, docker_config.image, docker_config.version, docker_config.platform));
+            commands.push(format!(
+                "docker buildx build -f ./{} -t {}:{} --platform {} -o type=docker .",
+                dockerfile_file_name, docker_config.image, docker_config.version, docker_config.platform
+            ));
         }
 
         info!("docker commands: {:#?}", commands);
@@ -218,8 +220,7 @@ impl DockerHandler {
             config.version = Utils::get_date(Some("%Y%m%d-%H%M%S".to_string()));
         }
 
-
-        return config
+        return config;
     }
 
     //  拉取 nginx 镜像 docker pull xxx
@@ -228,7 +229,7 @@ impl DockerHandler {
         let lines = docker_config.dockerfile.lines();
         for line in lines.into_iter() {
             if !first_line.is_empty() {
-                break
+                break;
             }
 
             first_line = line.to_string();
@@ -246,13 +247,13 @@ impl DockerHandler {
 
         let command = first_line.replace("FROM", "docker pull");
         info!("docker pull command: {}", command);
-        return command
+        return command;
     }
 
     /// 替换 Dockerfile中的变量
-    fn replace_variables(pipeline: &Pipeline, docker_config: &mut Vec<PipelineStepComponent>){
+    fn replace_variables(pipeline: &Pipeline, docker_config: &mut Vec<PipelineStepComponent>) {
         if docker_config.is_empty() {
-            return
+            return;
         }
 
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
@@ -261,12 +262,14 @@ impl DockerHandler {
         let re = Regex::new(r"\$\w+").unwrap();
         for config in docker_config.iter_mut() {
             let value = config.value.clone();
-            let value = re.replace_all(&value, |caps: &regex::Captures| {
-                let caps = &caps[0];
-                let caps= caps.replace("$", "");
-                let variable_value: String = PipelineRunnableStage::get_value_from_variables(&snapshot.runnable_variables, &caps);
-                return variable_value;
-            }).to_string();
+            let value = re
+                .replace_all(&value, |caps: &regex::Captures| {
+                    let caps = &caps[0];
+                    let caps = caps.replace("$", "");
+                    let variable_value: String = PipelineRunnableStage::get_value_from_variables(&snapshot.runnable_variables, &caps);
+                    return variable_value;
+                })
+                .to_string();
             config.value = value;
         }
     }
