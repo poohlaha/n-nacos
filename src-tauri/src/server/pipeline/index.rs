@@ -401,6 +401,7 @@ impl Treat<HttpResponse> for Pipeline {
                 Some(PipelineRunnableQueryForm {
                     status_list: vec![],
                     runtime_id: Some(last_run_id.clone()),
+                    need_condition_last_run_id: None,
                 }),
             )
             .await?;
@@ -760,6 +761,7 @@ impl Pipeline {
                         Some(PipelineRunnableQueryForm {
                             status_list: vec![],
                             runtime_id: Some(last_run_id.clone()),
+                            need_condition_last_run_id: None,
                         }),
                     )
                     .await?;

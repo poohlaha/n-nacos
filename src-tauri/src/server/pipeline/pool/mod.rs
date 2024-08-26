@@ -234,10 +234,14 @@ impl Pool {
     /// 从 database 中读取任务列表
     pub(crate) async fn get_list() -> Result<Vec<PipelineRuntime>, String> {
         // 获取排队中的数据
-        let response = PipelineRunnable::get_runtime_list(Some(PipelineRunnableQueryForm {
-            status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
-            runtime_id: None,
-        }))
+        let response = PipelineRunnable::get_runtime_list(
+            None,
+            Some(PipelineRunnableQueryForm {
+                status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
+                runtime_id: None,
+                need_condition_last_run_id: Some(true),
+            }),
+        )
         .await?;
 
         if response.code != 200 {

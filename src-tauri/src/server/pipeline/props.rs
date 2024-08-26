@@ -465,6 +465,8 @@ pub struct PipelineRuntimeVariable {
     pub(crate) name: String,
     pub(crate) value: String,
     pub(crate) genre: String,
+    pub(crate) require: String,
+    pub(crate) disabled: String,
     #[serde(rename = "desc")]
     pub(crate) description: String,
     #[serde(rename = "createTime")]

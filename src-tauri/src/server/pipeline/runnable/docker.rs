@@ -1,8 +1,9 @@
 //! Docker, 可以使用第三方库 `bollard`
 
-use std::io::{Read, Write};
+use crate::database::interface::Treat;
 use crate::error::Error;
 use crate::helper::index::Helper;
+use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::props::{PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineStepComponent};
 use crate::server::pipeline::runnable::stage::{PipelineRunnableResult, PipelineRunnableStage};
@@ -12,12 +13,11 @@ use handlers::file::FileHandler;
 use handlers::utils::Utils;
 use log::{error, info};
 use regex::Regex;
+use sftp::sftp::SftpHandler;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use sftp::sftp::SftpHandler;
 use tauri::AppHandle;
-use crate::database::interface::Treat;
-use crate::server::index::Server;
 
 pub struct DockerHandler;
 
@@ -63,9 +63,10 @@ impl DockerHandler {
             return Err(Error::convert_string("run pipeline failed, `runtime basic filed` is empty!"));
         }
 
+        let order = runtime.order.unwrap_or(1);
         let basic = basic.clone().unwrap();
         let docker_config = Self::exec_docker_config(pipeline, stage_step, snapshot);
-        info!("docker config: {:#?}", docker_config);
+        PipelineRunnable::save_log(app, &format!("docker config: {:#?}", docker_config), &pipeline.server_id, &pipeline.id, order);
 
         if DockerConfig::is_empty(&docker_config) {
             return Err(Error::convert_string("run pipeline failed, `docker config some field` is empty!"));
@@ -154,9 +155,7 @@ impl DockerHandler {
         }
 
         info!("run docker commands success !");
-
         if docker_config.need_push == "Yes" {
-            let order = runtime.order.unwrap_or(1);
             return Self::update_image(app, pipeline, &docker_config, &image, order).await;
         }
 
@@ -312,16 +311,14 @@ impl DockerHandler {
         let session = SftpHandler::connect(&serve, log_func.clone())?;
         let mut channel = SftpHandler::create_channel(&session)?;
 
-        let cmd = format!("echo {} | sudo -S su -", serve.password);
-        channel.exec(&cmd).map_err(|err| {
-            let msg = format!("switch to root user error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
+        // 登录到 root
+        let login_cmd = format!("echo {} | sudo -S -i", serve.password);
 
         // 获取当前 YAML 配置
-        let cmd = format!("kubectl get deploy {} -n devops -o yaml", docker_config.image);
+        let yaml_cmd = format!("kubectl get deploy {} -n devops -o yaml", docker_config.image);
+        let cmd = format!("{} bash -c '{}'", login_cmd, yaml_cmd);
+        info!("get yaml config command: {}", cmd);
+
         channel.exec(&cmd).map_err(|err| {
             let msg = format!("get kubectl yaml config error: {:#?}", err);
             error!("{}", &msg);
@@ -337,55 +334,65 @@ impl DockerHandler {
             Error::convert_string(&msg)
         })?;
 
+        SftpHandler::close_channel_in_err(&mut channel);
+
+        /*
         let regex = Regex::new(r#"image:\s*([^\s]+)"#).unwrap();
         let modified_yaml = regex.replace_all(&yaml_content, format!("image: {}", image).as_str());
+        */
 
-        PipelineRunnable::save_log(app, &format!("Docker Modified YAML:\n{}", modified_yaml), &pipeline.server_id, &pipeline.id, order);
+        PipelineRunnable::save_log(app, &format!("kubectl yaml content:\n{}", yaml_content), &pipeline.server_id, &pipeline.id, order);
+        if yaml_content.is_empty() {
+            return Err(Error::convert_string("can not get kubectl yaml config !"));
+        }
 
-        // 将修改后的 YAML 应用回 Kubernetes
-        channel.request_pty("xterm", None, None).map_err(|err| {
-            let msg = format!("get request pty error: {:#?}", err);
+        let image_cmd = format!(
+            r#"{{"spec": {{
+                "template": {{
+                    "spec": {{
+                        "containers": [
+                            {{
+                                "name": "{}",
+                                "image": "{}"
+                            }}
+                        ]
+                    }}
+                }}
+            }}
+        }}"#,
+            docker_config.image, image
+        )
+        .replace("\n", "") // 去除所有换行符
+        .replace("  ", ""); // 去除多余空格
+
+        let cmd = format!("{} kubectl patch deployment {} -n devops --type=merge --patch '{}'", login_cmd, docker_config.image, image_cmd);
+        PipelineRunnable::save_log(app, &format!("kubectl update image command:\n{}", cmd), &pipeline.server_id, &pipeline.id, order);
+
+        let mut channel = SftpHandler::create_channel(&session)?;
+        channel.exec(&cmd).map_err(|err| {
+            let msg = format!("exec command `kubectl patch` error: {:#?}", err);
             error!("{}", &msg);
             SftpHandler::close_channel_in_err(&mut channel);
             Error::convert_string(&msg)
         })?;
 
-        channel.shell().map_err(|err| {
-            let msg = format!("open shell error: {:#?}", err);
+        let mut output = String::new();
+        channel.read_to_string(&mut output).map_err(|err| {
+            let msg = format!("read grep command error: {:#?}", err);
             error!("{}", &msg);
             SftpHandler::close_channel_in_err(&mut channel);
             Error::convert_string(&msg)
         })?;
 
-        // 执行 `kubectl apply` 命令
-        channel.exec("kubectl apply -f -").map_err(|err| {
-            let msg = format!("exec command `kubectl apply` error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
-
-        // 写入修改后的 YAML 内容到 `stdin`, 0: 标准输入, 1: 标准输出, 2: 标准错误
-        let mut stdin = channel.stream(0);
-        stdin.write_all(modified_yaml.as_bytes()).unwrap();
-        stdin.flush().map_err(|err| {
-            let msg = format!("flush stdin data error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
-
-        drop(stdin); // 关闭 stdin
+        PipelineRunnable::save_log(app, &format!("output info: {}", output), &pipeline.server_id, &pipeline.id, order);
 
         SftpHandler::close_channel_in_err(&mut channel);
 
         PipelineRunnable::save_log(app, "update `image` in `kubectl` success ...", &pipeline.server_id, &pipeline.id, order);
-
         return Ok(PipelineRunnableResult {
             success: true,
             msg: "".to_string(),
             pipeline: Some(pipeline.clone()),
-        })
+        });
     }
-
 }

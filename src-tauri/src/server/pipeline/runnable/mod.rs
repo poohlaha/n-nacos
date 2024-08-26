@@ -31,9 +31,11 @@ lazy_static! {
 }
 pub struct PipelineRunnable;
 
+#[derive(Clone, Debug)]
 pub struct PipelineRunnableQueryForm {
     pub(crate) status_list: Vec<String>,
     pub(crate) runtime_id: Option<String>,
+    pub(crate) need_condition_last_run_id: Option<bool>,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -93,8 +95,12 @@ impl PipelineRunnable {
     }
 
     /// 获取运行历史记录
-    pub(crate) async fn get_runtime_list(query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
-        let result = Self::get_runtime_detail(&Pipeline::default(), false, query_form).await?;
+    pub(crate) async fn get_runtime_list(pipeline: Option<Pipeline>, query_form: Option<PipelineRunnableQueryForm>) -> Result<HttpResponse, String> {
+        let mut pipe = Pipeline::default();
+        if let Some(pipeline) = pipeline {
+            pipe = pipeline
+        }
+        let result = Self::get_runtime_detail(&pipe, false, query_form).await?;
         get_success_response_by_value(result.runtime_list)
     }
 
@@ -169,6 +175,8 @@ impl PipelineRunnable {
                     v.`name` as runtime_variable_name,
                     v.`value` as runtime_variable_value,
                     v.genre as runtime_variable_genre,
+                    v.`require` as runtime_variable_require,
+                    v.disabled as runtime_variable_disabled,
                     v.description as runtime_variable_description,
                     v.create_time as runtime_variable_create_time,
                     v.update_time as runtime_variable_update_time
@@ -176,10 +184,19 @@ impl PipelineRunnable {
                     pipeline_runtime r
                     LEFT JOIN pipeline_runtime_snapshot s ON r.id = s.runtime_id
                     LEFT JOIN pipeline_runtime_variable v ON s.id = v.snapshot_id
-                WHERE
-                   1 = 1
          "#,
         );
+
+        // need_condition_last_run_id
+        if let Some(query_form) = query_form.clone() {
+            if let Some(need_condition_last_run_id) = query_form.need_condition_last_run_id {
+                if need_condition_last_run_id {
+                    sql.push_str(" INNER JOIN pipeline p on p.last_run_id = r.id ");
+                }
+            }
+        }
+
+        sql.push_str(" WHERE 1 = 1");
 
         if !pipeline.id.is_empty() {
             sql.push_str(&format!(" AND r.pipeline_id = '{}'", pipeline.id));
@@ -282,6 +299,8 @@ impl PipelineRunnable {
                 name: row.try_get("runtime_variable_name").unwrap_or(String::new()),
                 value: row.try_get("runtime_variable_value").unwrap_or(String::new()),
                 genre: row.try_get("runtime_variable_genre").unwrap_or(String::new()),
+                require: row.try_get("runtime_variable_require").unwrap_or(String::new()),
+                disabled: row.try_get("runtime_variable_disabled").unwrap_or(String::new()),
                 description: row.try_get("runtime_variable_description").unwrap_or(String::new()),
                 create_time: row.try_get("runtime_variable_create_time").unwrap_or(None),
                 update_time: row.try_get("runtime_variable_update_time").unwrap_or(None),
@@ -364,6 +383,7 @@ impl PipelineRunnable {
             Some(PipelineRunnableQueryForm {
                 status_list: vec![PipelineStatus::got(PipelineStatus::Queue), PipelineStatus::got(PipelineStatus::Process)],
                 runtime_id: props.id.clone(),
+                need_condition_last_run_id: None,
             }),
         )
         .await?;
@@ -478,8 +498,8 @@ impl PipelineRunnable {
                 let variable_query = sqlx::query::<MySql>(
                     r#"
             INSERT INTO pipeline_runtime_variable (
-                id, snapshot_id, `order`, name, `value`, genre, description, create_time, update_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, snapshot_id, `order`, name, `value`, genre, `require`, disabled, description, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(Uuid::new_v4().to_string())
@@ -488,6 +508,8 @@ impl PipelineRunnable {
                 .bind(&variable.name)
                 .bind(&variable.value)
                 .bind(&variable.genre)
+                .bind(&variable.require)
+                .bind(&variable.disabled)
                 .bind(&variable.description)
                 .bind(&create_time)
                 .bind("");

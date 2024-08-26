@@ -15,7 +15,7 @@ webInstall:
 
 run:
 	$(call webInstall)
-	cd $(ROOT_ENCLOSURE_DIR) && pnpm tauri dev
+	cd $(ROOT_ENCLOSURE_DIR) && pnpm i && pnpm tauri dev
 
 build:
 	$(call webInstall)
