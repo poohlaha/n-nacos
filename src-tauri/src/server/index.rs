@@ -168,7 +168,7 @@ impl Treat<HttpResponse> for Server {
         // 删除 pipeline
         for pipe in pipeline_list.iter() {
             query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline WHERE id = ?").bind(&pipe.id));
-            Pipeline::delete_by_pipeline(&pipe.id, &mut query_list);
+            Pipeline::delete_by_pipeline(&pipe.id, &mut query_list, true);
         }
 
         let response = DBHelper::batch_commit(query_list).await?;

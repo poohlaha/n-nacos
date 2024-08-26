@@ -129,6 +129,8 @@ CREATE TABLE `pipeline_runtime_variable` (
   `name` varchar(255) DEFAULT NULL,
   `value` varchar(255) DEFAULT NULL,
   `genre` varchar(255) DEFAULT NULL,
+  `require` varchar(255) DEFAULT NULL,
+  `disabled` varchar(255) DEFAULT NULL,
   `description` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '描述',
   `create_time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   `update_time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,

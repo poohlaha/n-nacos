@@ -14,9 +14,10 @@ use handlers::utils::Utils;
 use log::{error, info};
 use regex::Regex;
 use sftp::sftp::SftpHandler;
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use ssh2::Session;
 use tauri::AppHandle;
 
 pub struct DockerHandler;
@@ -309,7 +310,6 @@ impl DockerHandler {
         let func = |_: &str| {};
         let log_func = Arc::new(Mutex::new(func));
         let session = SftpHandler::connect(&serve, log_func.clone())?;
-        let mut channel = SftpHandler::create_channel(&session)?;
 
         // 登录到 root
         let login_cmd = format!("echo {} | sudo -S -i", serve.password);
@@ -319,22 +319,7 @@ impl DockerHandler {
         let cmd = format!("{} bash -c '{}'", login_cmd, yaml_cmd);
         info!("get yaml config command: {}", cmd);
 
-        channel.exec(&cmd).map_err(|err| {
-            let msg = format!("get kubectl yaml config error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
-
-        let mut yaml_content = String::new();
-        channel.read_to_string(&mut yaml_content).map_err(|err| {
-            let msg = format!("read command error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
-
-        SftpHandler::close_channel_in_err(&mut channel);
+        let yaml_content = Self::exec_remote_command(&session, &cmd, "get kubectl yaml config error")?;
 
         /*
         let regex = Regex::new(r#"image:\s*([^\s]+)"#).unwrap();
@@ -368,25 +353,16 @@ impl DockerHandler {
         let cmd = format!("{} kubectl patch deployment {} -n devops --type=merge --patch '{}'", login_cmd, docker_config.image, image_cmd);
         PipelineRunnable::save_log(app, &format!("kubectl update image command:\n{}", cmd), &pipeline.server_id, &pipeline.id, order);
 
-        let mut channel = SftpHandler::create_channel(&session)?;
-        channel.exec(&cmd).map_err(|err| {
-            let msg = format!("exec command `kubectl patch` error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
+        let output = Self::exec_remote_command(&session, &cmd, "exec command `kubectl patch` error")?;
+        PipelineRunnable::save_log(app, &format!("kubectl patch output info: {}", output), &pipeline.server_id, &pipeline.id, order);
 
-        let mut output = String::new();
-        channel.read_to_string(&mut output).map_err(|err| {
-            let msg = format!("read grep command error: {:#?}", err);
-            error!("{}", &msg);
-            SftpHandler::close_channel_in_err(&mut channel);
-            Error::convert_string(&msg)
-        })?;
-
-        PipelineRunnable::save_log(app, &format!("output info: {}", output), &pipeline.server_id, &pipeline.id, order);
-
-        SftpHandler::close_channel_in_err(&mut channel);
+        // 如果没有 change, 需要删除原来的 pod
+        if output.contains("no change") {
+            let success = Self::delete_pod_name(app, &session, pipeline, docker_config, order)?;
+            if !success {
+                return Err(Error::convert_string("delete pod error!"));
+            }
+        }
 
         PipelineRunnable::save_log(app, "update `image` in `kubectl` success ...", &pipeline.server_id, &pipeline.id, order);
         return Ok(PipelineRunnableResult {
@@ -394,5 +370,58 @@ impl DockerHandler {
             msg: "".to_string(),
             pipeline: Some(pipeline.clone()),
         });
+    }
+
+    fn delete_pod_name(app: &AppHandle, session: &Session, pipeline: &Pipeline, docker_config: &DockerConfig, order: u32) -> Result<bool, String> {
+        // 1. 查找 pod 名字 kubectl get pod -n devops | grep xxx
+        let cmd = format!("kubectl get pod -n devops | grep {}", docker_config.image);
+        let output = Self::exec_remote_command(session, &cmd, "kubectl get pod name error")?;
+
+        if output.is_empty() {
+            PipelineRunnable::save_log(app, "no pod name output", &pipeline.server_id, &pipeline.id, order);
+            return Ok(false)
+        }
+
+        let mut pod_name = String::new();
+        if let Some(line) = output.lines().find(|line| line.starts_with(&docker_config.image)) {
+            let name = line.split_whitespace().next().unwrap_or("");
+            PipelineRunnable::save_log(app, &format!("pod name: {}", name), &pipeline.server_id, &pipeline.id, order);
+            pod_name = name.to_string()
+        } else {
+            PipelineRunnable::save_log(app, "no pad name get !", &pipeline.server_id, &pipeline.id, order);
+        }
+
+        if pod_name.is_empty() {
+            return Ok(false)
+        }
+
+        // 2. delete pod: kubectl delete pod -n devops ${podname}
+        let cmd = format!("kubectl delete pod -n devops {}", pod_name);
+        let output = Self::exec_remote_command(session, &cmd, "kubectl delete pod error")?;
+        PipelineRunnable::save_log(app, &format!("kubectl delete pod output: {}", output), &pipeline.server_id, &pipeline.id, order);
+        return Ok(true)
+    }
+
+    /// 执行远程命令
+    fn exec_remote_command(session: &Session, cmd: &str, error_msg: &str) -> Result<String, String> {
+        let mut channel = SftpHandler::create_channel(&session)?;
+        channel.exec(&cmd).map_err(|err| {
+            let msg = format!("{}: {:#?}", error_msg, err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        let mut output = String::new();
+        channel.read_to_string(&mut output).map_err(|err| {
+            let msg = format!("{}: {:#?}", error_msg, err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        SftpHandler::close_channel_in_err(&mut channel);
+
+        return Ok(output)
     }
 }

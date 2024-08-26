@@ -240,7 +240,7 @@ impl Treat<HttpResponse> for Pipeline {
         let basic = &pipeline.basic;
         let mut query_list = Vec::new();
 
-        Self::delete_by_pipeline(&pipeline.id, &mut query_list);
+        Self::delete_by_pipeline(&pipeline.id, &mut query_list, true);
 
         // 插入 stages
         Self::insert_stages(&pipeline.process_config, process_id.clone(), create_time.clone(), &mut query_list);
@@ -357,7 +357,7 @@ impl Treat<HttpResponse> for Pipeline {
 
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         query_list.push(sqlx::query::<MySql>("DELETE FROM pipeline WHERE id = ? and server_id = ?").bind(&id).bind(&server_id));
-        Pipeline::delete_by_pipeline(&pipeline.id, &mut query_list);
+        Pipeline::delete_by_pipeline(&pipeline.id, &mut query_list, false);
         let response = DBHelper::batch_commit(query_list).await?;
 
         if response.code != 200 {
@@ -810,7 +810,7 @@ impl Pipeline {
                 let step_query = sqlx::query::<MySql>(
                     r#"
             INSERT INTO pipeline_step (id, group_id, `order`, module, command, label, `status`, create_time, update_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
                 )
                 .bind(step_id.clone())
@@ -1050,7 +1050,7 @@ impl Pipeline {
         return serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
     }
 
-    pub(crate) fn delete_by_pipeline(pipeline_id: &str, query_list: &mut Vec<Query<MySql, MySqlArguments>>) {
+    pub(crate) fn delete_by_pipeline(pipeline_id: &str, query_list: &mut Vec<Query<MySql, MySqlArguments>>, is_update_delete: bool) {
         // 删除 pipeline_variable
         let variable_delete_query = sqlx::query::<MySql>(
             r#"
@@ -1060,23 +1060,25 @@ impl Pipeline {
         .bind(pipeline_id.to_string().clone());
         query_list.push(variable_delete_query);
 
-        // 删除 pipeline_basic
-        let basic_delete_query = sqlx::query::<MySql>(
-            r#"
+        if !is_update_delete {
+            // 删除 pipeline_basic
+            let basic_delete_query = sqlx::query::<MySql>(
+                r#"
             DELETE FROM pipeline_basic WHERE pipeline_id = ?
         "#,
-        )
-        .bind(pipeline_id.to_string().clone());
-        query_list.push(basic_delete_query);
+            )
+                .bind(pipeline_id.to_string().clone());
+            query_list.push(basic_delete_query);
 
-        // 删除 pipeline_process
-        let process_delete_query = sqlx::query::<MySql>(
-            r#"
+            // 删除 pipeline_process
+            let process_delete_query = sqlx::query::<MySql>(
+                r#"
             DELETE FROM pipeline_process WHERE pipeline_id = ?
         "#,
-        )
-        .bind(pipeline_id.to_string().clone());
-        query_list.push(process_delete_query);
+            )
+                .bind(pipeline_id.to_string().clone());
+            query_list.push(process_delete_query);
+        }
 
         // 删除 step_component
         let step_component_delete_query = sqlx::query::<MySql>(
