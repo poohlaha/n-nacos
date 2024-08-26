@@ -212,7 +212,7 @@ impl PipelineRunnableStage {
             PipelineCommandStatus::Minimize => Self::exec_step_minimize(app, &pipeline, stage).await,
             PipelineCommandStatus::Compress => Self::exec_step_compress(app, &pipeline, stage).await,
             PipelineCommandStatus::Deploy => Self::exec_step_deploy(app, &pipeline, stage).await,
-            PipelineCommandStatus::Docker => Self::exec_step_docker(app, &pipeline, stage),
+            PipelineCommandStatus::Docker => Self::exec_step_docker(app, &pipeline, stage).await,
             PipelineCommandStatus::Notice => Self::exec_step_notice(app, &pipeline, stage).await,
         };
     }
@@ -724,13 +724,13 @@ impl PipelineRunnableStage {
     }
 
     /// docker
-    fn exec_step_docker(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
+    async fn exec_step_docker(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         let step = &stage_step.step;
         let pack_name = &format!("【{}】", &step.label);
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
         let order = runtime.order.unwrap_or(1);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
-        return DockerHandler::exec(app, pipeline, stage_step);
+        return DockerHandler::exec(app, pipeline, stage_step).await;
     }
     /// 发送通知
     async fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {

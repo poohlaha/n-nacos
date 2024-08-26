@@ -1,5 +1,6 @@
 //! Docker, 可以使用第三方库 `bollard`
 
+use std::io::{Read, Write};
 use crate::error::Error;
 use crate::helper::index::Helper;
 use crate::server::pipeline::index::Pipeline;
@@ -12,8 +13,11 @@ use handlers::utils::Utils;
 use log::{error, info};
 use regex::Regex;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use sftp::sftp::SftpHandler;
 use tauri::AppHandle;
+use crate::database::interface::Treat;
+use crate::server::index::Server;
 
 pub struct DockerHandler;
 
@@ -43,7 +47,7 @@ impl DockerConfig {
 }
 
 impl DockerHandler {
-    pub(crate) fn exec(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
+    pub(crate) async fn exec(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
         // let step = stage_step.step.clone();
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
         let snapshot = &runtime.snapshot;
@@ -109,6 +113,7 @@ impl DockerHandler {
         let dockerfile_file_path_str = dockerfile_file_path.to_string_lossy().to_string();
         FileHandler::write_to_file_when_clear(&dockerfile_file_path_str, &dockerfile_content)?;
 
+        let image = format!("{}/{}/{}:{}", docker_config.address, docker_config.namespace, docker_config.image, docker_config.version);
         if docker_config.need_push == "Yes" {
             let pull_nginx_command = Self::exec_docker_pull_nginx(&docker_config);
             if pull_nginx_command.is_empty() {
@@ -117,11 +122,10 @@ impl DockerHandler {
                 return Err(Error::convert_string("can not get pull nginx command !"));
             }
 
-            let cmd = format!("{}/{}/{}:{}", docker_config.address, docker_config.namespace, docker_config.image, docker_config.version);
             commands.push(format!("docker login {} --username {} --password {}", docker_config.address, docker_config.user, docker_config.password));
             commands.push(pull_nginx_command);
-            commands.push(format!("docker buildx build -f ./{} -t {} --platform {} -o type=docker .", dockerfile_file_name, cmd, docker_config.platform));
-            commands.push(format!("docker push {}", cmd));
+            commands.push(format!("docker buildx build -f ./{} -t {} --platform {} -o type=docker .", dockerfile_file_name, image, docker_config.platform));
+            commands.push(format!("docker push {}", image));
         } else {
             // 不需要推送，直接打本地包
             commands.push(format!(
@@ -150,6 +154,12 @@ impl DockerHandler {
         }
 
         info!("run docker commands success !");
+
+        if docker_config.need_push == "Yes" {
+            let order = runtime.order.unwrap_or(1);
+            return Self::update_image(app, pipeline, &docker_config, &image, order).await;
+        }
+
         return Ok(result.clone());
     }
 
@@ -273,4 +283,109 @@ impl DockerHandler {
             config.value = value;
         }
     }
+
+    /// 连接服务器, 修改 image 地址
+    async fn update_image(app: &AppHandle, pipeline: &Pipeline, docker_config: &DockerConfig, image: &str, order: u32) -> Result<PipelineRunnableResult, String> {
+        PipelineRunnable::save_log(app, "update `image` in `kubectl` ...", &pipeline.server_id, &pipeline.id, order);
+
+        let server_id = &pipeline.server_id;
+
+        // 查找服务器信息
+        let mut server = Server::default();
+        server.id = server_id.to_string();
+        let response = Server::get_by_id(&server).await?;
+        if response.code != 200 {
+            return Err(Error::convert_string(&response.error));
+        }
+
+        let server: Server = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let serve = sftp::config::Server {
+            host: server.ip.to_string(),
+            port: server.port,
+            username: server.account.to_string(),
+            password: server.pwd.to_string(),
+            timeout: Some(5),
+        };
+
+        let func = |_: &str| {};
+        let log_func = Arc::new(Mutex::new(func));
+        let session = SftpHandler::connect(&serve, log_func.clone())?;
+        let mut channel = SftpHandler::create_channel(&session)?;
+
+        let cmd = format!("echo {} | sudo -S su -", serve.password);
+        channel.exec(&cmd).map_err(|err| {
+            let msg = format!("switch to root user error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        // 获取当前 YAML 配置
+        let cmd = format!("kubectl get deploy {} -n devops -o yaml", docker_config.image);
+        channel.exec(&cmd).map_err(|err| {
+            let msg = format!("get kubectl yaml config error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        let mut yaml_content = String::new();
+        channel.read_to_string(&mut yaml_content).map_err(|err| {
+            let msg = format!("read command error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        let regex = Regex::new(r#"image:\s*([^\s]+)"#).unwrap();
+        let modified_yaml = regex.replace_all(&yaml_content, format!("image: {}", image).as_str());
+
+        PipelineRunnable::save_log(app, &format!("Docker Modified YAML:\n{}", modified_yaml), &pipeline.server_id, &pipeline.id, order);
+
+        // 将修改后的 YAML 应用回 Kubernetes
+        channel.request_pty("xterm", None, None).map_err(|err| {
+            let msg = format!("get request pty error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        channel.shell().map_err(|err| {
+            let msg = format!("open shell error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        // 执行 `kubectl apply` 命令
+        channel.exec("kubectl apply -f -").map_err(|err| {
+            let msg = format!("exec command `kubectl apply` error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        // 写入修改后的 YAML 内容到 `stdin`, 0: 标准输入, 1: 标准输出, 2: 标准错误
+        let mut stdin = channel.stream(0);
+        stdin.write_all(modified_yaml.as_bytes()).unwrap();
+        stdin.flush().map_err(|err| {
+            let msg = format!("flush stdin data error: {:#?}", err);
+            error!("{}", &msg);
+            SftpHandler::close_channel_in_err(&mut channel);
+            Error::convert_string(&msg)
+        })?;
+
+        drop(stdin); // 关闭 stdin
+
+        SftpHandler::close_channel_in_err(&mut channel);
+
+        PipelineRunnable::save_log(app, "update `image` in `kubectl` success ...", &pipeline.server_id, &pipeline.id, order);
+
+        return Ok(PipelineRunnableResult {
+            success: true,
+            msg: "".to_string(),
+            pipeline: Some(pipeline.clone()),
+        })
+    }
+
 }
