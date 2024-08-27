@@ -99,21 +99,22 @@ impl DockerHandler {
         FileHandler::write_to_file_when_clear(&nginx_file_path_str, &docker_config.nginx_content)?;
 
         let mut dockerfile_content = docker_config.dockerfile.clone();
-        if docker_config.need_push == "Yes" {
-            // 添加 nginx
-            if !docker_config.nginx_path.is_empty() {
-                let mut content: Vec<String> = dockerfile_content.lines().map(String::from).collect();
-                content.push(format!("ADD {} {}", nginx_file_name, docker_config.nginx_path));
-                content.push(format!("COPY {} ./", deploy_dir));
-                dockerfile_content = content.join("\n");
-            }
+        // 添加 nginx
+        if !docker_config.nginx_path.is_empty() {
+            let mut content: Vec<String> = dockerfile_content.lines().map(String::from).collect();
+            content.push(format!("ADD {} {}", nginx_file_name, docker_config.nginx_path));
+            content.push(format!("COPY {} ./", deploy_dir));
+            dockerfile_content = content.join("\n");
         }
+
+        dockerfile_content.push_str("\n CMD [\"nginx\", \"-g\", \"daemon off;\"]");
 
         // 创建 Dockerfile 文件
         let dockerfile_file_name = format!("Dockerfile_{}", time); // dockerfile 文件名
         let dockerfile_file_path = Path::new(&basic.path).join(&dockerfile_file_name);
         let dockerfile_file_path_str = dockerfile_file_path.to_string_lossy().to_string();
         FileHandler::write_to_file_when_clear(&dockerfile_file_path_str, &dockerfile_content)?;
+        PipelineRunnable::save_log(app, &format!("Dockerfile content: \n{:#?}", dockerfile_content), &pipeline.server_id, &pipeline.id, order);
 
         let image = format!("{}/{}/{}:{}", docker_config.address, docker_config.namespace, docker_config.image, docker_config.version);
         if docker_config.need_push == "Yes" {
@@ -136,7 +137,8 @@ impl DockerHandler {
             ));
         }
 
-        info!("docker commands: {:#?}", commands);
+
+        PipelineRunnable::save_log(app, &format!("docker commands:\n{:#?}", commands), &pipeline.server_id, &pipeline.id, order);
 
         let order = runtime.order.unwrap_or(1);
         for command in commands.iter() {
@@ -155,6 +157,9 @@ impl DockerHandler {
             }
         }
 
+        FileHandler::delete_file(&dockerfile_file_path_str)?; // 删除 Dockerfile 文件
+        FileHandler::delete_file(&nginx_file_path_str)?; // 删除 nginx.conf 文件
+
         info!("run docker commands success !");
         if docker_config.need_push == "Yes" {
             return Self::update_image(app, pipeline, &docker_config, &image, order).await;
@@ -166,8 +171,8 @@ impl DockerHandler {
     /// 获取 docker 配置
     fn exec_docker_config(pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep, snapshot: &PipelineRuntimeSnapshot) -> DockerConfig {
         let mut components = stage_step.step.clone().components.clone();
-        info!("replace variables");
-        Self::replace_variables(pipeline, &mut components);
+        // info!("replace variables");
+        // Self::replace_variables(pipeline, &mut components);
 
         let mut config = DockerConfig::default();
         for component in components.iter() {
@@ -261,6 +266,7 @@ impl DockerHandler {
     }
 
     /// 替换 Dockerfile中的变量
+    #[allow(dead_code)]
     fn replace_variables(pipeline: &Pipeline, docker_config: &mut Vec<PipelineStepComponent>) {
         if docker_config.is_empty() {
             return;
@@ -339,6 +345,7 @@ impl DockerHandler {
                             {{
                                 "name": "{}",
                                 "image": "{}"
+                                 "imagePullPolicy": "Always"
                             }}
                         ]
                     }}
@@ -365,6 +372,19 @@ impl DockerHandler {
                 return Err(Error::convert_string("delete pod error!"));
             }
             PipelineRunnable::save_log(app, "delete pod success ...", &pipeline.server_id, &pipeline.id, order);
+        }
+
+        // 重启 pod: kubectl rollout restart deployment/xxx(image) -n devops
+        let cmd = format!("{} kubectl rollout restart deployment/{} -n devops", login_cmd, docker_config.image);
+        PipelineRunnable::save_log(app, &format!("pod restart command: {}", cmd), &pipeline.server_id, &pipeline.id, order);
+        let output = Self::exec_remote_command(app, pipeline, &session, &cmd, "exec command `kubectl patch` error", order)?;
+        PipelineRunnable::save_log(app, &format!("pod restart command output info: {}", output), &pipeline.server_id, &pipeline.id, order);
+        if output.is_empty() {
+            return Ok(PipelineRunnableResult {
+                success: false,
+                msg: "pod restart error".to_string(),
+                pipeline: None,
+            });
         }
 
         return Ok(PipelineRunnableResult {
