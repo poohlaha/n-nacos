@@ -319,7 +319,7 @@ impl DockerHandler {
         let cmd = format!("{} bash -c '{}'", login_cmd, yaml_cmd);
         info!("get yaml config command: {}", cmd);
 
-        let yaml_content = Self::exec_remote_command(&session, &cmd, "get kubectl yaml config error")?;
+        let yaml_content = Self::exec_remote_command(app, pipeline, &session, &cmd, "get kubectl yaml config error", order)?;
 
         /*
         let regex = Regex::new(r#"image:\s*([^\s]+)"#).unwrap();
@@ -353,18 +353,20 @@ impl DockerHandler {
         let cmd = format!("{} kubectl patch deployment {} -n devops --type=merge --patch '{}'", login_cmd, docker_config.image, image_cmd);
         PipelineRunnable::save_log(app, &format!("kubectl update image command:\n{}", cmd), &pipeline.server_id, &pipeline.id, order);
 
-        let output = Self::exec_remote_command(&session, &cmd, "exec command `kubectl patch` error")?;
+        let output = Self::exec_remote_command(app, pipeline, &session, &cmd, "exec command `kubectl patch` error", order)?;
         PipelineRunnable::save_log(app, &format!("kubectl patch output info: {}", output), &pipeline.server_id, &pipeline.id, order);
+        PipelineRunnable::save_log(app, "update `image` in `kubectl` success ...", &pipeline.server_id, &pipeline.id, order);
 
         // 如果没有 change, 需要删除原来的 pod
         if output.contains("no change") {
-            let success = Self::delete_pod_name(app, &session, pipeline, docker_config, order)?;
+            PipelineRunnable::save_log(app, "no change will delete pod ...", &pipeline.server_id, &pipeline.id, order);
+            let success = Self::delete_pod_name(app, &session, pipeline, docker_config, order, &login_cmd)?;
             if !success {
                 return Err(Error::convert_string("delete pod error!"));
             }
+            PipelineRunnable::save_log(app, "delete pod success ...", &pipeline.server_id, &pipeline.id, order);
         }
 
-        PipelineRunnable::save_log(app, "update `image` in `kubectl` success ...", &pipeline.server_id, &pipeline.id, order);
         return Ok(PipelineRunnableResult {
             success: true,
             msg: "".to_string(),
@@ -372,10 +374,10 @@ impl DockerHandler {
         });
     }
 
-    fn delete_pod_name(app: &AppHandle, session: &Session, pipeline: &Pipeline, docker_config: &DockerConfig, order: u32) -> Result<bool, String> {
+    fn delete_pod_name(app: &AppHandle, session: &Session, pipeline: &Pipeline, docker_config: &DockerConfig, order: u32, login_cmd: &str) -> Result<bool, String> {
         // 1. 查找 pod 名字 kubectl get pod -n devops | grep xxx
-        let cmd = format!("kubectl get pod -n devops | grep {}", docker_config.image);
-        let output = Self::exec_remote_command(session, &cmd, "kubectl get pod name error")?;
+        let cmd = format!("{} kubectl get pod -n devops | grep {}", login_cmd, docker_config.image);
+        let output = Self::exec_remote_command(app, pipeline, session, &cmd, "kubectl get pod name error", order)?;
 
         if output.is_empty() {
             PipelineRunnable::save_log(app, "no pod name output", &pipeline.server_id, &pipeline.id, order);
@@ -396,14 +398,21 @@ impl DockerHandler {
         }
 
         // 2. delete pod: kubectl delete pod -n devops ${podname}
-        let cmd = format!("kubectl delete pod -n devops {}", pod_name);
-        let output = Self::exec_remote_command(session, &cmd, "kubectl delete pod error")?;
+        let cmd = format!("{} kubectl delete pod -n devops {}", login_cmd, pod_name);
+        let mut output = Self::exec_remote_command(app, pipeline, session, &cmd, "kubectl delete pod error", order)?;
         PipelineRunnable::save_log(app, &format!("kubectl delete pod output: {}", output), &pipeline.server_id, &pipeline.id, order);
-        return Ok(true)
+        output = output.trim().to_string();
+
+        if output.ends_with("deleted") {
+            return Ok(true)
+        }
+
+        return Ok(false)
     }
 
     /// 执行远程命令
-    fn exec_remote_command(session: &Session, cmd: &str, error_msg: &str) -> Result<String, String> {
+    fn exec_remote_command(app: &AppHandle, pipeline: &Pipeline, session: &Session, cmd: &str, error_msg: &str, order: u32) -> Result<String, String> {
+        PipelineRunnable::save_log(app, &format!("exec remote command: {}", cmd), &pipeline.server_id, &pipeline.id, order);
         let mut channel = SftpHandler::create_channel(&session)?;
         channel.exec(&cmd).map_err(|err| {
             let msg = format!("{}: {:#?}", error_msg, err);
@@ -420,6 +429,7 @@ impl DockerHandler {
             Error::convert_string(&msg)
         })?;
 
+        // PipelineRunnable::save_log(app, &format!("output info: {}", output), &pipeline.server_id, &pipeline.id, order);
         SftpHandler::close_channel_in_err(&mut channel);
 
         return Ok(output)
