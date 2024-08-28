@@ -169,7 +169,7 @@ impl DockerHandler {
     }
 
     /// 获取 docker 配置
-    fn exec_docker_config(pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep, snapshot: &PipelineRuntimeSnapshot) -> DockerConfig {
+    fn exec_docker_config(_: &Pipeline, stage_step: &PipelineRunnableStageStep, snapshot: &PipelineRuntimeSnapshot) -> DockerConfig {
         let mut components = stage_step.step.clone().components.clone();
         // info!("replace variables");
         // Self::replace_variables(pipeline, &mut components);
