@@ -8,7 +8,7 @@ use crate::task::Task;
 /// 获取服务器列表
 #[tauri::command]
 pub async fn get_server_list() -> Result<HttpResponse, String> {
-    Task::task_param_future::<Server, _, _>(Server::default(), |server| async move { Server::get_list(&server).await }).await
+    Task::task_param_future::<Server, _, _>(Server::default(), |server| async move { Server::get_list(&*server).await }).await
 }
 
 /// 插入服务器

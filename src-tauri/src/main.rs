@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod article;
 mod database;
 mod error;
 mod event;
@@ -22,6 +23,7 @@ use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
+use exports::article::{get_article_list, save_article, get_article_tag_list};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
@@ -115,6 +117,9 @@ async fn main() {
             pipeline_batch_run,
             start_monitor,
             stop_monitor,
+            get_article_list,
+            save_article,
+            get_article_tag_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

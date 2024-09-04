@@ -45,7 +45,7 @@ impl Treat<HttpResponse> for Server {
 
         let mut server_clone = server.clone();
         if server.id.is_empty() {
-            server_clone.id = Uuid::new_v4().to_string()
+            server_clone.id = Uuid::new_v4().to_string();
         }
 
         if server.port == 0 {
