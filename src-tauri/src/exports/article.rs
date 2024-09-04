@@ -1,6 +1,6 @@
 //! 导出文章方法
 
-use crate::article::{Article};
+use crate::article::Article;
 use crate::prepare::{get_error_response, get_success_response_by_value, HttpResponse};
 use crate::task::Task;
 
@@ -23,8 +23,8 @@ pub async fn get_article_tag_list() -> Result<HttpResponse, String> {
         let res = Article::get_tag_list().await;
         match res {
             Ok(res) => get_success_response_by_value(res),
-            Err(err) => Ok(get_error_response(&err))
+            Err(err) => Ok(get_error_response(&err)),
         }
-    }).await
+    })
+    .await
 }
-

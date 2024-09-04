@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlArguments;
 use sqlx::query::Query;
 use sqlx::{FromRow, MySql};
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, FromRow)]
