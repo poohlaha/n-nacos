@@ -35,6 +35,7 @@ fs_extra = "1.3"
 rayon = "1.8"
 crypto-hash = "0.3"
 handlers = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "handlers", version = "0.1.2"}
+docker = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "docker", version = "0.1.5"}
 sftp = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "sftp", version = "0.1.9"}
 minimize = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "minimize", version = "0.1.1"}
 chrono = "0.4.35"

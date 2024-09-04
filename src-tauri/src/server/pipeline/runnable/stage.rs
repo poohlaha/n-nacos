@@ -10,8 +10,10 @@ use crate::prepare::{convert_res, get_error_response, get_success_response_by_va
 use crate::server::index::Server;
 use crate::server::pipeline::index::Pipeline;
 use crate::server::pipeline::languages::h5::{H5FileHandler, H5_INSTALLED_CMDS};
-use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineTag};
+use crate::server::pipeline::props::{PipelineCommandStatus, PipelineRunnableStageStep, PipelineRuntime, PipelineRuntimeSnapshot, PipelineRuntimeVariable, PipelineStageTask, PipelineStatus, PipelineStep, PipelineStepComponent, PipelineTag};
 use crate::server::pipeline::runnable::PipelineRunnable;
+use docker::docker::DockerHandler;
+use handlers::utils::Utils;
 use log::{error, info};
 use sftp::config::Upload;
 use sftp::upload::SftpUpload;
@@ -19,8 +21,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 // use images_compressor::compressor::{Compressor, CompressorArgs};
 // use images_compressor::factor::Factor;
-use crate::server::pipeline::runnable::docker::DockerHandler;
+use docker::DockerConfig;
 use minimize::minify::Minimize;
+use regex::Regex;
 use tauri::AppHandle;
 
 const DIR_NAME: &str = "projects";
@@ -730,7 +733,7 @@ impl PipelineRunnableStage {
         let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
         let order = runtime.order.unwrap_or(1);
         PipelineRunnable::save_log(app, &format!("exec step {} ...", pack_name), &pipeline.server_id, &pipeline.id, order);
-        return DockerHandler::exec(app, pipeline, stage_step).await;
+        return DockerHelper::exec(app, pipeline, stage_step).await;
     }
     /// 发送通知
     async fn exec_step_notice(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
@@ -1147,5 +1150,165 @@ impl PipelineRunnableStage {
         }
 
         return deploy_dir;
+    }
+}
+
+pub struct DockerHelper;
+
+impl DockerHelper {
+    pub(crate) async fn exec(app: &AppHandle, pipeline: &Pipeline, stage_step: &PipelineRunnableStageStep) -> Result<PipelineRunnableResult, String> {
+        // let step = stage_step.step.clone();
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let snapshot = &runtime.snapshot;
+
+        let basic = &runtime.basic;
+        let result = PipelineRunnableResult {
+            success: true,
+            msg: "".to_string(),
+            pipeline: Some(pipeline.clone()),
+        };
+
+        if basic.is_none() {
+            return Err(Error::convert_string("run pipeline failed, `runtime basic filed` is empty!"));
+        }
+
+        let order = runtime.order.unwrap_or(1);
+        let basic = basic.clone().unwrap();
+
+        // 查找服务器信息
+        let mut server = Server::default();
+        server.id = pipeline.server_id.clone();
+        let response = Server::get_by_id(&server).await?;
+        if response.code != 200 {
+            return Err(Error::convert_string(&response.error));
+        }
+
+        let server: Server = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let serve = sftp::config::Server {
+            host: server.ip.to_string(),
+            port: server.port,
+            username: server.account.to_string(),
+            password: server.pwd.to_string(),
+            timeout: Some(5),
+        };
+
+        let mut docker_config = Self::exec_docker_config(pipeline, stage_step, snapshot);
+        PipelineRunnable::save_log(app, &format!("docker config: {:#?}", docker_config), &pipeline.server_id, &pipeline.id, order);
+
+        docker_config.deploy_dir = PipelineRunnableStage::get_deploy_dir(&stage_step, &snapshot);
+        docker_config.kubernetes_namespace = String::from("devops");
+        docker_config.dir = basic.path.clone();
+
+        let order = runtime.order.unwrap_or(1);
+
+        let server_id_cloned = Arc::new(pipeline.server_id.clone());
+        let id_cloned = Arc::new(pipeline.id.clone());
+        let app_cloned = Arc::new(app.clone());
+
+        let success = DockerHandler::exec(&docker_config, &serve, move |msg| {
+            PipelineRunnable::save_log(&*app_cloned, msg, &*server_id_cloned, &*id_cloned, order);
+        })
+        .await?;
+
+        if !success {
+            return Err(Error::convert_string("package docker error!!"));
+        }
+
+        return Ok(result.clone());
+    }
+
+    /// 获取 docker 配置
+    fn exec_docker_config(_: &Pipeline, stage_step: &PipelineRunnableStageStep, snapshot: &PipelineRuntimeSnapshot) -> DockerConfig {
+        let components = stage_step.step.clone().components.clone();
+        // info!("replace variables");
+        // Self::replace_variables(pipeline, &mut components);
+
+        let mut config = DockerConfig::default();
+        for component in components.iter() {
+            let prop = &component.prop;
+            if prop == "docker.dockerfile" {
+                config.dockerfile = component.value.clone();
+            }
+
+            if prop == "docker.address" {
+                config.address = component.value.clone();
+            }
+
+            if prop == "docker.image" {
+                config.image = component.value.clone();
+            }
+
+            if prop == "docker.namespace" {
+                config.namespace = component.value.clone();
+            }
+
+            if prop == "docker.version" {
+                config.version = component.value.clone();
+            }
+
+            if prop == "docker.user" {
+                config.user = component.value.clone();
+            }
+
+            if prop == "docker.password" {
+                config.password = component.value.clone();
+            }
+
+            if prop == "docker.platform" {
+                config.platform = component.value.clone();
+            }
+
+            if prop == "docker.needPush" {
+                config.need_push = component.value.clone();
+            }
+
+            if prop == "docker.nginx.path" {
+                config.nginx_path = component.value.clone();
+            }
+
+            if prop == "docker.nginx.conf" {
+                config.nginx_content = component.value.clone();
+            }
+        }
+
+        // 如果 image 为空从 pipeline_runtime_variable 中查找
+        if config.image.is_empty() {
+            config.image = PipelineRunnableStage::get_value_from_variables(&snapshot.runnable_variables, "dockerImage");
+        }
+
+        if config.version.is_empty() {
+            config.version = PipelineRunnableStage::get_value_from_variables(&snapshot.runnable_variables, "dockerVersion");
+        }
+
+        if config.version.is_empty() {
+            config.version = Utils::get_date(Some("%Y%m%d-%H%M%S".to_string()));
+        }
+
+        return config;
+    }
+
+    /// 替换 Dockerfile中的变量
+    #[allow(dead_code)]
+    fn replace_variables(pipeline: &Pipeline, docker_config: &mut Vec<PipelineStepComponent>) {
+        if docker_config.is_empty() {
+            return;
+        }
+
+        let runtime = &pipeline.clone().runtime.unwrap_or(PipelineRuntime::default());
+        let snapshot = &runtime.snapshot;
+
+        let re = Regex::new(r"\$\w+").unwrap();
+        for config in docker_config.iter_mut() {
+            let value = config.value.clone();
+            let value = re
+                .replace_all(&value, |caps: &regex::Captures| {
+                    let caps = &caps[0];
+                    let caps = caps.replace("$", "");
+                    let variable_value: String = PipelineRunnableStage::get_value_from_variables(&snapshot.runnable_variables, &caps);
+                    return variable_value;
+                })
+                .to_string();
+            config.value = value;
+        }
     }
 }
