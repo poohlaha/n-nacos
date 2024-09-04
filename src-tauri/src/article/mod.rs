@@ -4,7 +4,6 @@ use crate::database::helper::DBHelper;
 use crate::error::Error;
 use crate::prepare::{get_error_response, get_success_response_by_value, HttpResponse};
 use handlers::utils::Utils;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlArguments;
 use sqlx::query::{Query, QueryAs};
@@ -80,18 +79,18 @@ impl Article {
     /// 列表
     pub(crate) async fn get_list(query: &ArticleQuery) -> Result<HttpResponse, String> {
         let list = Self::get_query_list(query).await?;
+        let list_count = Self::get_query_list_count().await?;
         if query.only_query_list {
             return get_success_response_by_value(ArticleResult {
                 list,
                 tag_list: vec![],
-                list_count: 0,
+                list_count,
                 tag_classify_list: vec![],
                 archive_list: vec![],
             });
         }
 
         let tag_list = Self::get_tag_list(Vec::new()).await?;
-        let list_count = Self::get_query_list_count().await?;
         let tag_classify_list = Self::get_tag_classify().await?;
         let archive_list = Self::get_archive_list().await?;
 
@@ -113,14 +112,9 @@ impl Article {
                 a.content AS article_content,
                 a.tag_ids AS article_tag_ids,
                 a.create_time AS article_create_time,
-                a.update_time AS article_update_time,
-                t.id AS article_tag_id,
-                t.`name` AS article_tag_name,
-                t.create_time AS article_tag_create_time,
-                t.update_time AS article_tag_update_time
+                a.update_time AS article_update_time
             FROM
                 article a
-            LEFT JOIN article_tag t ON FIND_IN_SET(t.id, a.tag_ids)
             ORDER BY
             CASE
                 WHEN
@@ -136,7 +130,7 @@ impl Article {
         );
 
         if query.page_size > 0 {
-            sql.push_str(&format!(" LIMIT {} ", query.page_size));
+            sql.push_str(&format!(" LIMIT {},{} ", (query.current_page - 1) * (query.page_size as u32), (query.page_size as u32) * query.current_page));
         }
 
         let query = sqlx::query(&sql);
@@ -145,61 +139,27 @@ impl Article {
             return Ok(Vec::new());
         }
 
-        let mut map: IndexMap<String, Article> = IndexMap::new();
-        let mut tag_map: IndexMap<String, ArticleTag> = IndexMap::new();
-        let mut tag_id_map: IndexMap<String, Vec<String>> = IndexMap::new();
-
+        let mut list: Vec<Article> = Vec::new();
         for row in rows.iter() {
             let article_id = row.try_get("article_id").unwrap_or(String::new());
-            let article_tag_id = row.try_get("article_tag_id").unwrap_or(String::new());
             let article_tag_ids = row.try_get("article_tag_ids").unwrap_or(String::new());
-            let mut tags: Vec<String> = Vec::new();
+            let mut tags_ids: Vec<String> = Vec::new();
             if !article_tag_ids.is_empty() {
-                tags = article_tag_ids.split(",").map(|s| s.to_string()).collect();
+                tags_ids = article_tag_ids.split(",").map(|s| s.to_string()).collect();
             }
 
-            tag_id_map.entry(article_id.clone()).or_insert_with(|| tags);
-
-            map.entry(article_id.clone()).or_insert_with(|| Article {
+            let article_tags = Self::get_tag_list(tags_ids).await?;
+            let tags: Vec<String> = article_tags.iter().map(|a| a.name.to_string()).collect();
+            list.push(Article {
                 id: Some(article_id),
                 title: row.try_get("article_title").unwrap_or(String::new()),
-                tags: Vec::new(),
+                tags,
                 content: row.try_get("article_content").unwrap_or(String::new()),
                 create_time: row.try_get("article_create_time").unwrap_or(None),
                 update_time: row.try_get("article_update_time").unwrap_or(None),
             });
-
-            tag_map.entry(article_tag_id.clone()).or_insert_with(|| ArticleTag {
-                id: article_tag_id,
-                name: row.try_get("article_tag_name").unwrap_or(String::new()),
-                create_time: row.try_get("article_tag_create_time").unwrap_or(None),
-                update_time: row.try_get("article_tag_update_time").unwrap_or(None),
-            });
         }
 
-        for article_id in map.clone().keys() {
-            let article = map.get_mut(article_id);
-            if let Some(article) = article {
-                let id = article.id.clone().unwrap_or(String::new());
-                let tag_ids = tag_id_map.get(&id);
-                if let Some(tag_ids) = tag_ids {
-                    let tags: Vec<String> = tag_ids
-                        .iter()
-                        .map(|t| {
-                            let tag = tag_map.get(t);
-                            if let Some(tag) = tag {
-                                return tag.name.clone();
-                            }
-
-                            return String::new();
-                        })
-                        .collect();
-                    article.tags = tags;
-                }
-            }
-        }
-
-        let list: Vec<Article> = map.into_values().collect();
         Ok(list)
     }
 
@@ -336,7 +296,6 @@ impl Article {
 
     /// 获取 tag 列表
     pub(crate) async fn get_tag_list(tag_ids: Vec<String>) -> Result<Vec<ArticleTag>, String> {
-        let query: QueryAs<MySql, ArticleTag, MySqlArguments>;
         let mut sql = String::from(
             r#"
             SELECT id,
@@ -344,17 +303,23 @@ impl Article {
             create_time,
             update_time
             FROM article_tag
-            ORDER By create_time DESC
         "#,
         );
 
         if !tag_ids.is_empty() {
-            sql.push_str("  WHERE id IN (?)");
-            query = sqlx::query_as::<_, ArticleTag>(&sql).bind(tag_ids.join(","));
-        } else {
-            query = sqlx::query_as::<_, ArticleTag>(&sql);
+            sql.push_str(" WHERE (");
+            for (i, id) in tag_ids.iter().enumerate() {
+                sql.push_str(&format!(" id = '{}'", id));
+                if i != tag_ids.len() - 1 {
+                    sql.push_str(" OR ")
+                }
+            }
+            sql.push_str(")");
         }
 
+        sql.push_str(" ORDER By create_time DESC ");
+
+        let query = sqlx::query_as::<_, ArticleTag>(&sql);
         let response = DBHelper::execute_query(query).await?;
         if response.code != 200 {
             return Err(Error::convert_string(&format!("get article tag list error: {}", response.error)));
