@@ -40,6 +40,7 @@ sftp = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package
 minimize = {git = "https://github.com/poohlaha/rust-tools", branch = "main", package = "minimize", version = "0.1.1"}
 chrono = "0.4.35"
 futures = "0.3.30"
+indexmap = "2.3.0"
 # images-compressor = "1.0.3"
 
 [dependencies.uuid]

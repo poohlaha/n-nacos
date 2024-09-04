@@ -2,12 +2,13 @@
 
 use crate::database::helper::DBHelper;
 use crate::error::Error;
-use crate::prepare::{get_error_response, get_success_response, HttpResponse};
+use crate::prepare::{get_error_response, get_success_response_by_value, HttpResponse};
 use handlers::utils::Utils;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlArguments;
-use sqlx::query::Query;
-use sqlx::{FromRow, MySql};
+use sqlx::query::{Query, QueryAs};
+use sqlx::{FromRow, MySql, Row};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -27,15 +28,205 @@ pub struct Article {
     pub title: String,
     pub tags: Vec<String>,
     pub content: String,
+    #[serde(rename = "createTime")]
     pub(crate) create_time: Option<String>, // 创建时间
     #[serde(rename = "updateTime")]
     pub(crate) update_time: Option<String>, // 修改时间
 }
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleResult {
+    pub list: Vec<Article>,
+    #[serde(rename = "tagList")]
+    pub tag_list: Vec<ArticleTag>,
+    #[serde(rename = "listCount")]
+    pub list_count: u32,
+    #[serde(rename = "tagClassifyList")]
+    pub tag_classify_list: Vec<ArticleTagClassify>,
+    #[serde(rename = "archiveList")]
+    pub archive_list: Vec<ArticleArchive>,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleTagClassify {
+    pub id: String,
+    #[serde(rename = "tagName")]
+    pub tag_name: String,
+    #[serde(rename = "articleCount")]
+    pub article_count: u32,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleQuery {
+    #[serde(rename = "currentPage")]
+    pub current_page: u32,
+    #[serde(rename = "pageSize")]
+    pub page_size: i32,
+    #[serde(rename = "onlyQueryList")]
+    pub only_query_list: bool,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleArchive {
+    #[serde(rename = "monthName")]
+    pub month_name: String,
+    #[serde(rename = "yearName")]
+    pub year_name: String,
+    #[serde(rename = "articleCount")]
+    pub article_count: u32,
+}
+
 impl Article {
     /// 列表
-    pub(crate) async fn get_list() -> Result<HttpResponse, String> {
-        Ok(get_success_response(None))
+    pub(crate) async fn get_list(query: &ArticleQuery) -> Result<HttpResponse, String> {
+        let list = Self::get_query_list(query).await?;
+        if query.only_query_list {
+            return get_success_response_by_value(ArticleResult {
+                list,
+                tag_list: vec![],
+                list_count: 0,
+                tag_classify_list: vec![],
+                archive_list: vec![],
+            });
+        }
+
+        let tag_list = Self::get_tag_list(Vec::new()).await?;
+        let list_count = Self::get_query_list_count().await?;
+        let tag_classify_list = Self::get_tag_classify().await?;
+        let archive_list = Self::get_archive_list().await?;
+
+        get_success_response_by_value(ArticleResult {
+            list,
+            tag_list,
+            list_count,
+            tag_classify_list,
+            archive_list,
+        })
+    }
+
+    async fn get_query_list(query: &ArticleQuery) -> Result<Vec<Article>, String> {
+        let mut sql = String::from(
+            r#"
+            SELECT
+                a.id AS article_id,
+                a.title AS article_title,
+                a.content AS article_content,
+                a.tag_ids AS article_tag_ids,
+                a.create_time AS article_create_time,
+                a.update_time AS article_update_time,
+                t.id AS article_tag_id,
+                t.`name` AS article_tag_name,
+                t.create_time AS article_tag_create_time,
+                t.update_time AS article_tag_update_time
+            FROM
+                article a
+            LEFT JOIN article_tag t ON FIND_IN_SET(t.id, a.tag_ids)
+            ORDER BY
+            CASE
+                WHEN
+                     a.update_time IS NULL or a.update_time = ''
+                THEN
+                     0
+                ELSE
+                     1
+            END DESC,
+            a.update_time DESC,
+            a.create_time DESC
+        "#,
+        );
+
+        if query.page_size > 0 {
+            sql.push_str(&format!(" LIMIT {} ", query.page_size));
+        }
+
+        let query = sqlx::query(&sql);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut map: IndexMap<String, Article> = IndexMap::new();
+        let mut tag_map: IndexMap<String, ArticleTag> = IndexMap::new();
+        let mut tag_id_map: IndexMap<String, Vec<String>> = IndexMap::new();
+
+        for row in rows.iter() {
+            let article_id = row.try_get("article_id").unwrap_or(String::new());
+            let article_tag_id = row.try_get("article_tag_id").unwrap_or(String::new());
+            let article_tag_ids = row.try_get("article_tag_ids").unwrap_or(String::new());
+            let mut tags: Vec<String> = Vec::new();
+            if !article_tag_ids.is_empty() {
+                tags = article_tag_ids.split(",").map(|s| s.to_string()).collect();
+            }
+
+            tag_id_map.entry(article_id.clone()).or_insert_with(|| tags);
+
+            map.entry(article_id.clone()).or_insert_with(|| Article {
+                id: Some(article_id),
+                title: row.try_get("article_title").unwrap_or(String::new()),
+                tags: Vec::new(),
+                content: row.try_get("article_content").unwrap_or(String::new()),
+                create_time: row.try_get("article_create_time").unwrap_or(None),
+                update_time: row.try_get("article_update_time").unwrap_or(None),
+            });
+
+            tag_map.entry(article_tag_id.clone()).or_insert_with(|| ArticleTag {
+                id: article_tag_id,
+                name: row.try_get("article_tag_name").unwrap_or(String::new()),
+                create_time: row.try_get("article_tag_create_time").unwrap_or(None),
+                update_time: row.try_get("article_tag_update_time").unwrap_or(None),
+            });
+        }
+
+        for article_id in map.clone().keys() {
+            let article = map.get_mut(article_id);
+            if let Some(article) = article {
+                let id = article.id.clone().unwrap_or(String::new());
+                let tag_ids = tag_id_map.get(&id);
+                if let Some(tag_ids) = tag_ids {
+                    let tags: Vec<String> = tag_ids
+                        .iter()
+                        .map(|t| {
+                            let tag = tag_map.get(t);
+                            if let Some(tag) = tag {
+                                return tag.name.clone();
+                            }
+
+                            return String::new();
+                        })
+                        .collect();
+                    article.tags = tags;
+                }
+            }
+        }
+
+        let list: Vec<Article> = map.into_values().collect();
+        Ok(list)
+    }
+
+    async fn get_query_list_count() -> Result<u32, String> {
+        let sql = String::from(
+            r#"
+            SELECT
+                COUNT(a.id) as article_count
+            FROM
+                article a
+            LEFT JOIN article_tag t ON FIND_IN_SET(t.id, a.tag_ids)
+        "#,
+        );
+
+        let query = sqlx::query(&sql);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let row = rows.get(0);
+        if let Some(row) = row {
+            let article_count = row.try_get::<i64, _>("article_count").unwrap_or(0);
+            return Ok(article_count as u32);
+        }
+
+        return Ok(0);
     }
 
     /// 保存
@@ -72,7 +263,7 @@ impl Article {
             .collect();
 
         // 过滤已存在的 tag
-        let tag_list = Self::get_tag_list().await?;
+        let tag_list = Self::get_tag_list(Vec::new()).await?;
         let mut new_tags: Vec<String> = Vec::new();
         let mut remaining_tags: Vec<String> = Vec::new(); // 剩余的 tags
 
@@ -144,16 +335,115 @@ impl Article {
     }
 
     /// 获取 tag 列表
-    pub(crate) async fn get_tag_list() -> Result<Vec<ArticleTag>, String> {
-        // 判断 IP 是否存在
-        let query = sqlx::query_as::<_, ArticleTag>("select id, `name`, create_time, update_time from article_tag");
+    pub(crate) async fn get_tag_list(tag_ids: Vec<String>) -> Result<Vec<ArticleTag>, String> {
+        let query: QueryAs<MySql, ArticleTag, MySqlArguments>;
+        let mut sql = String::from(
+            r#"
+            SELECT id,
+            `name`,
+            create_time,
+            update_time
+            FROM article_tag
+            ORDER By create_time DESC
+        "#,
+        );
+
+        if !tag_ids.is_empty() {
+            sql.push_str("  WHERE id IN (?)");
+            query = sqlx::query_as::<_, ArticleTag>(&sql).bind(tag_ids.join(","));
+        } else {
+            query = sqlx::query_as::<_, ArticleTag>(&sql);
+        }
 
         let response = DBHelper::execute_query(query).await?;
         if response.code != 200 {
-            return Err(Error::convert_string(&format!("get tag list error: {}", response.error)));
+            return Err(Error::convert_string(&format!("get article tag list error: {}", response.error)));
         }
 
         let tags: Vec<ArticleTag> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
         return Ok(tags);
+    }
+
+    async fn get_tag_classify() -> Result<Vec<ArticleTagClassify>, String> {
+        let sql = String::from(
+            r#"
+            SELECT
+                t.id AS tag_id,
+                t.`name` AS tag_name,
+                COUNT(a.id) AS article_count
+            FROM
+                article_tag t
+            LEFT JOIN
+                article a ON FIND_IN_SET(t.id, a.tag_ids) > 0
+            GROUP BY
+                t.id, t.`name`
+            ORDER BY article_count DESC
+        "#,
+        );
+
+        let query = sqlx::query(&sql);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut tag_classify_list: Vec<ArticleTagClassify> = Vec::new();
+        for row in rows.iter() {
+            tag_classify_list.push(ArticleTagClassify {
+                id: row.try_get("tag_id").unwrap_or(String::new()),
+                tag_name: row.try_get("tag_name").unwrap_or(String::new()),
+                article_count: row.try_get::<i64, _>("article_count").unwrap_or(0) as u32,
+            })
+        }
+
+        Ok(tag_classify_list)
+    }
+
+    /// 查询文章归档数
+    async fn get_archive_list() -> Result<Vec<ArticleArchive>, String> {
+        let sql = String::from(
+            r#"
+           SELECT
+                CASE
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 1 THEN '一月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 2 THEN '二月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 3 THEN '三月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 4 THEN '四月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 5 THEN '五月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 6 THEN '六月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 7 THEN '七月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 8 THEN '八月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 9 THEN '九月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 10 THEN '十月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 11 THEN '十一月'
+                    WHEN MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d')) = 12 THEN '十二月'
+                END AS month_name,
+                DATE_FORMAT(STR_TO_DATE(a.create_time, '%Y-%m-%d'), '%Y') AS year_name,
+                COUNT(a.id) AS article_count
+            FROM
+                article a
+            GROUP BY
+                year_name, month_name
+            ORDER BY
+                year_name DESC, FIELD(month_name, '一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月');
+        "#,
+        );
+
+        let query = sqlx::query(&sql);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut article_archive_list: Vec<ArticleArchive> = Vec::new();
+        for row in rows.iter() {
+            article_archive_list.push(ArticleArchive {
+                month_name: row.try_get("month_name").unwrap_or(String::new()),
+                year_name: row.try_get("year_name").unwrap_or(String::new()),
+                article_count: row.try_get::<i64, _>("article_count").unwrap_or(0) as u32,
+            })
+        }
+
+        Ok(article_archive_list)
     }
 }

@@ -15,13 +15,13 @@ use crate::server::pipeline::props::{
 use crate::server::pipeline::runnable::{PipelineRunnable, PipelineRunnableQueryForm};
 use async_trait::async_trait;
 use handlers::utils::Utils;
+use indexmap::IndexMap;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::mysql::{MySqlArguments, MySqlRow};
 use sqlx::query::Query;
 use sqlx::{FromRow, MySql, Row};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -553,13 +553,13 @@ impl Pipeline {
         }
 
         // 组装数据
-        let mut variable_map: HashMap<String, PipelineVariable> = HashMap::new();
-        let mut map: HashMap<String, Pipeline> = HashMap::new();
-        let mut process_map: HashMap<String, PipelineProcess> = HashMap::new();
-        let mut stage_map: HashMap<String, PipelineStage> = HashMap::new();
-        let mut group_map: HashMap<String, PipelineGroup> = HashMap::new();
-        let mut step_map: HashMap<String, PipelineStep> = HashMap::new();
-        let mut step_component_map: HashMap<String, PipelineStepComponent> = HashMap::new();
+        let mut variable_map: IndexMap<String, PipelineVariable> = IndexMap::new();
+        let mut map: IndexMap<String, Pipeline> = IndexMap::new();
+        let mut process_map: IndexMap<String, PipelineProcess> = IndexMap::new();
+        let mut stage_map: IndexMap<String, PipelineStage> = IndexMap::new();
+        let mut group_map: IndexMap<String, PipelineGroup> = IndexMap::new();
+        let mut step_map: IndexMap<String, PipelineStep> = IndexMap::new();
+        let mut step_component_map: IndexMap<String, PipelineStepComponent> = IndexMap::new();
 
         for row in rows.iter() {
             let pipeline_id = row.try_get("pipeline_id").unwrap_or(String::new());
