@@ -496,4 +496,15 @@ impl Article {
 
         Ok(article_archive_list)
     }
+
+    /// 删除
+    pub(crate) async fn delete(id: &str) -> Result<HttpResponse, String> {
+        let response = Self::get_by_id(id).await?;
+        if response.code != 200 {
+            return Ok(response);
+        }
+
+        let query = sqlx::query::<MySql>("DELETE FROM article WHERE id = ?").bind(&id);
+        return DBHelper::execute_update(query).await;
+    }
 }
