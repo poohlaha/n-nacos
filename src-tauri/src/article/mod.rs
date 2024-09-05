@@ -539,7 +539,8 @@ impl Article {
             return Err(Error::convert_string("根据标签获取文章失败, id 为空"));
         }
 
-        let sql = String::from(r#"
+        let sql = String::from(
+            r#"
         SELECT
             a.id AS article_id,
             a.title AS article_title,
@@ -559,7 +560,8 @@ impl Article {
             article_year, a.id
         ORDER BY
             article_year DESC, a.create_time DESC
-        "#);
+        "#,
+        );
 
         let query = sqlx::query(&sql).bind(id);
         let rows = DBHelper::execute_rows(query).await?;
@@ -602,7 +604,8 @@ impl Article {
             return Err(Error::convert_string("查询归档文章失败, yearName 为空"));
         }
 
-        let sql = String::from(r#"
+        let sql = String::from(
+            r#"
         SELECT
             a.id AS article_id,
             a.title AS article_title,
@@ -630,7 +633,8 @@ impl Article {
             ) = ?
         ORDER BY
             a.create_time DESC
-        "#);
+        "#,
+        );
 
         let query = sqlx::query(&sql).bind(&archive_query.year_name).bind(&archive_query.month_name);
         let rows = DBHelper::execute_rows(query).await?;
