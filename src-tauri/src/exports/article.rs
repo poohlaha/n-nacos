@@ -22,10 +22,11 @@ pub async fn get_article_detail(id: String) -> Result<HttpResponse, String> {
     let mut query = ArticleQuery::default();
     query.id = Some(id);
     Task::task_param_future::<ArticleQuery, _, _>(query, |query| async move {
-        let query  = &*query;
+        let query = &*query;
         let id = query.id.clone().unwrap_or(String::new());
         Article::get_by_id(&id).await
-    }).await
+    })
+    .await
 }
 
 /// 获取文章标签列表
