@@ -23,7 +23,7 @@ use crate::exports::monitor::{start_monitor, stop_monitor};
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
-use exports::article::{get_article_list, get_article_tag_list, save_article};
+use exports::article::{get_article_list, get_article_tag_list, save_or_update_article, get_article_detail};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
@@ -118,8 +118,9 @@ async fn main() {
             start_monitor,
             stop_monitor,
             get_article_list,
-            save_article,
-            get_article_tag_list
+            save_or_update_article,
+            get_article_tag_list,
+            get_article_detail
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

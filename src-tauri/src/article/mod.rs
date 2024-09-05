@@ -4,9 +4,10 @@ use crate::database::helper::DBHelper;
 use crate::error::Error;
 use crate::prepare::{get_error_response, get_success_response_by_value, HttpResponse};
 use handlers::utils::Utils;
+use log::info;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlArguments;
-use sqlx::query::{Query, QueryAs};
+use sqlx::query::Query;
 use sqlx::{FromRow, MySql, Row};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -63,6 +64,7 @@ pub struct ArticleQuery {
     pub page_size: i32,
     #[serde(rename = "onlyQueryList")]
     pub only_query_list: bool,
+    pub id: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -115,15 +117,26 @@ impl Article {
                 a.update_time AS article_update_time
             FROM
                 article a
+        "#,
+        );
+
+        if let Some(id) = &query.id {
+            if !id.is_empty() {
+                sql.push_str(&format!(" WHERE a.id = '{}' ", id));
+            }
+        }
+
+        sql.push_str(
+            r#"
             ORDER BY
-            CASE
-                WHEN
-                     a.update_time IS NULL or a.update_time = ''
-                THEN
-                     0
-                ELSE
-                     1
-            END DESC,
+                CASE
+                    WHEN
+                         a.update_time IS NULL or a.update_time = ''
+                    THEN
+                         0
+                    ELSE
+                         1
+                END DESC,
             a.update_time DESC,
             a.create_time DESC
         "#,
@@ -189,8 +202,8 @@ impl Article {
         return Ok(0);
     }
 
-    /// 保存
-    pub(crate) async fn save(article: &Article) -> Result<HttpResponse, String> {
+    /// 保存或修改
+    pub(crate) async fn save_or_update(article: &Article) -> Result<HttpResponse, String> {
         if article.title.is_empty() {
             return Ok(get_error_response("title is empty !"));
         }
@@ -222,6 +235,10 @@ impl Article {
             })
             .collect();
 
+        if tags.is_empty() {
+            return Ok(get_error_response("tags is empty !"));
+        }
+
         // 过滤已存在的 tag
         let tag_list = Self::get_tag_list(Vec::new()).await?;
         let mut new_tags: Vec<String> = Vec::new();
@@ -237,38 +254,35 @@ impl Article {
             }
         }
 
-        let id = Uuid::new_v4().to_string();
-        let create_time = Utils::get_date(None);
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
+        let create_time = Utils::get_date(None);
 
-        let mut tag_ids: Vec<String> = Vec::new();
+        // 插入 tags
+        let mut tag_ids = Self::insert_tags(&new_tags, &mut query_list, create_time.clone()).await;
         if new_tags.len() > 0 {
-            for tag in new_tags.iter() {
-                let tag_id = Uuid::new_v4().to_string();
-                tag_ids.push(tag_id.clone());
-
-                let article_tag_query = sqlx::query::<MySql>(
-                    r#"
-                       INSERT INTO article_tag (
-                        id,
-                        name,
-                        create_time,
-                        update_time
-                        )
-                        VALUES (?, ?, ?, ?)
-                    "#,
-                )
-                .bind(tag_id.clone())
-                .bind(tag)
-                .bind(&create_time)
-                .bind("");
-                query_list.push(article_tag_query);
-            }
-
             tag_ids.extend(remaining_tags);
         } else {
-            tag_ids = remaining_tags;
+            tag_ids = remaining_tags.clone()
         }
+
+        if let Some(id) = &article.id {
+            let response = Self::get_by_id(id).await?;
+            if response.code != 200 {
+                return Ok(response);
+            }
+
+            Self::update(&article, &tag_ids, create_time.clone(), &mut query_list).await;
+        } else {
+            // insert
+            Self::save(&article, &tag_ids, create_time.clone(), &mut query_list).await;
+        }
+
+        DBHelper::batch_commit(query_list).await
+    }
+
+    /// 保存
+    async fn save(article: &Article, tag_ids: &Vec<String>, create_time: String, query_list: &mut Vec<Query<'_, MySql, MySqlArguments>>) {
+        let id = Uuid::new_v4().to_string();
 
         let article_query = sqlx::query::<MySql>(
             r#"
@@ -283,15 +297,86 @@ impl Article {
             VALUES (?, ?, ?, ?, ?, ?)
         "#,
         )
-        .bind(&id)
-        .bind(&article.title)
-        .bind(&article.content)
+        .bind(id)
+        .bind(article.title.clone())
+        .bind(article.content.clone())
         .bind(tag_ids.join(","))
-        .bind(&create_time)
+        .bind(create_time.clone())
         .bind("");
-
         query_list.push(article_query);
-        DBHelper::batch_commit(query_list).await
+    }
+
+    /// 保存
+    async fn update(article: &Article, tag_ids: &Vec<String>, create_time: String, query_list: &mut Vec<Query<'_, MySql, MySqlArguments>>) {
+        let article_query = sqlx::query::<MySql>(
+            r#"
+            UPDATE article
+            SET
+              title = ?, content = ?, tag_ids = ?, update_time = ?
+            WHERE id = ?
+        "#,
+        )
+        .bind(article.title.clone())
+        .bind(article.content.clone())
+        .bind(tag_ids.join(","))
+        .bind(create_time.clone())
+        .bind(article.id.clone());
+        query_list.push(article_query);
+    }
+
+    /// 插入 tags
+    async fn insert_tags(new_tags: &Vec<String>, query_list: &mut Vec<Query<'_, MySql, MySqlArguments>>, create_time: String) -> Vec<String> {
+        let mut tag_ids: Vec<String> = Vec::new();
+        if new_tags.is_empty() {
+            return tag_ids;
+        }
+
+        for tag in new_tags.iter() {
+            let tag_id = Uuid::new_v4().to_string();
+            tag_ids.push(tag_id.clone());
+
+            let article_tag_query = sqlx::query::<MySql>(
+                r#"
+                       INSERT INTO article_tag (
+                        id,
+                        name,
+                        create_time,
+                        update_time
+                        )
+                        VALUES (?, ?, ?, ?)
+                    "#,
+            )
+            .bind(tag_id.clone())
+            .bind(tag.clone())
+            .bind(create_time.clone())
+            .bind("");
+            query_list.push(article_tag_query);
+        }
+
+        return tag_ids;
+    }
+
+    pub(crate) async fn get_by_id(id: &str) -> Result<HttpResponse, String> {
+        if id.is_empty() {
+            return Ok(get_error_response("查询文章详情失败, id 为空 !"));
+        }
+
+        // 根据 id 查找是否存在
+        info!("get article by id: {}", id);
+        let article_list = Self::get_query_list(&ArticleQuery {
+            current_page: 0,
+            page_size: -1,
+            only_query_list: true,
+            id: Some(id.to_string()),
+        })
+        .await?;
+
+        if article_list.is_empty() {
+            return Ok(get_error_response("未找到文章记录 !"));
+        }
+
+        let article = article_list.get(0).unwrap();
+        return get_success_response_by_value(article.clone());
     }
 
     /// 获取 tag 列表
