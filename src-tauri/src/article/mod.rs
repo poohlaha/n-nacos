@@ -93,6 +93,13 @@ pub struct TagArticle {
     pub article_year: String,
 }
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveQuery {
+    #[serde(rename = "monthName")]
+    pub month_name: String,
+    #[serde(rename = "yearName")]
+    pub year_name: String,
+}
 
 impl Article {
     /// 列表
@@ -493,7 +500,7 @@ impl Article {
             GROUP BY
                 year_name, month_name
             ORDER BY
-                year_name DESC, FIELD(month_name, '一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月');
+                year_name DESC, FIELD(month_name, '一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月') DESC;
         "#,
         );
 
@@ -578,6 +585,67 @@ impl Article {
                 article_count: row.try_get::<i64, _>("article_count").unwrap_or(0) as u32,
                 article_content: row.try_get("article_content").unwrap_or(String::new()),
                 article_year,
+                article_create_time: row.try_get("article_create_time").unwrap_or(String::new()),
+            })
+        }
+
+        Ok(list)
+    }
+
+    /// 获取归档文章
+    pub(crate) async fn get_archive_article_list(archive_query: &ArchiveQuery) -> Result<Vec<TagArticle>, String> {
+        if archive_query.year_name.is_empty() {
+            return Err(Error::convert_string("查询归档文章失败, yearName 为空"));
+        }
+
+        if archive_query.month_name.is_empty() {
+            return Err(Error::convert_string("查询归档文章失败, yearName 为空"));
+        }
+
+        let sql = String::from(r#"
+        SELECT
+            a.id AS article_id,
+            a.title AS article_title,
+            a.content AS article_content,
+            a.create_time AS article_create_time
+        FROM
+            article a
+        WHERE
+            DATE_FORMAT(STR_TO_DATE(a.create_time, '%Y-%m-%d'), '%Y') = ?
+            AND (
+                CASE MONTH(STR_TO_DATE(a.create_time, '%Y-%m-%d'))
+                    WHEN 1 THEN '一月'
+                    WHEN 2 THEN '二月'
+                    WHEN 3 THEN '三月'
+                    WHEN 4 THEN '四月'
+                    WHEN 5 THEN '五月'
+                    WHEN 6 THEN '六月'
+                    WHEN 7 THEN '七月'
+                    WHEN 8 THEN '八月'
+                    WHEN 9 THEN '九月'
+                    WHEN 10 THEN '十月'
+                    WHEN 11 THEN '十一月'
+                    WHEN 12 THEN '十二月'
+                END
+            ) = ?
+        ORDER BY
+            a.create_time DESC
+        "#);
+
+        let query = sqlx::query(&sql).bind(&archive_query.year_name).bind(&archive_query.month_name);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut list: Vec<TagArticle> = Vec::new();
+        for row in rows.iter() {
+            list.push(TagArticle {
+                article_id: row.try_get("article_id").unwrap_or(String::new()),
+                article_title: row.try_get("article_title").unwrap_or(String::new()),
+                article_count: 0,
+                article_content: row.try_get("article_content").unwrap_or(String::new()),
+                article_year: archive_query.year_name.clone(),
                 article_create_time: row.try_get("article_create_time").unwrap_or(String::new()),
             })
         }

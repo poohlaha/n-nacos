@@ -1,6 +1,6 @@
 //! 导出文章方法
 
-use crate::article::{Article, ArticleQuery};
+use crate::article::{ArchiveQuery, Article, ArticleQuery};
 use crate::prepare::{get_error_response, get_success_response_by_value, HttpResponse};
 use crate::task::Task;
 
@@ -78,6 +78,23 @@ pub async fn get_tag_article_list(id: String) -> Result<HttpResponse, String> {
         let query = &*query;
         let id = query.id.clone().unwrap_or(String::new());
         let res = Article::get_tag_article_list(&id).await;
+        match res {
+            Ok(res) => get_success_response_by_value(res),
+            Err(err) => Ok(get_error_response(&err)),
+        }
+    })
+    .await
+}
+
+/// 获取归档文章
+#[tauri::command]
+pub async fn get_archive_article_list(year_name: String, month_name: String) -> Result<HttpResponse, String> {
+    let mut query = ArchiveQuery::default();
+    query.year_name = year_name.clone();
+    query.month_name = month_name.clone();
+
+    Task::task_param_future::<ArchiveQuery, _, _>(query, |query| async move {
+        let res = Article::get_archive_article_list(&*query).await;
         match res {
             Ok(res) => get_success_response_by_value(res),
             Err(err) => Ok(get_error_response(&err)),
