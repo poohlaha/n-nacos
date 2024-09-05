@@ -77,6 +77,23 @@ pub struct ArticleArchive {
     pub article_count: u32,
 }
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct TagArticle {
+    #[serde(rename = "articleId")]
+    pub article_id: String,
+    #[serde(rename = "articleTitle")]
+    pub article_title: String,
+    #[serde(rename = "articleContent")]
+    pub article_content: String,
+    #[serde(rename = "articleCreateTime")]
+    pub article_create_time: String,
+    #[serde(rename = "articleCount")]
+    pub article_count: u32,
+    #[serde(rename = "articleYear")]
+    pub article_year: String,
+}
+
+
 impl Article {
     /// 列表
     pub(crate) async fn get_list(query: &ArticleQuery) -> Result<HttpResponse, String> {
@@ -414,7 +431,8 @@ impl Article {
         return Ok(tags);
     }
 
-    async fn get_tag_classify() -> Result<Vec<ArticleTagClassify>, String> {
+    /// 获取标签分类
+    pub(crate) async fn get_tag_classify() -> Result<Vec<ArticleTagClassify>, String> {
         let sql = String::from(
             r#"
             SELECT
@@ -506,5 +524,64 @@ impl Article {
 
         let query = sqlx::query::<MySql>("DELETE FROM article WHERE id = ?").bind(&id);
         return DBHelper::execute_update(query).await;
+    }
+
+    /// 根据 tag_id 获取文章数
+    pub(crate) async fn get_tag_article_list(id: &str) -> Result<Vec<TagArticle>, String> {
+        if id.is_empty() {
+            return Err(Error::convert_string("根据标签获取文章失败, id 为空"));
+        }
+
+        let sql = String::from(r#"
+        SELECT
+            a.id AS article_id,
+            a.title AS article_title,
+            a.content AS article_content,
+            a.create_time AS article_create_time,
+            COUNT(a.id) AS article_count,
+            YEAR(a.create_time) AS article_year
+        FROM
+            article a
+        JOIN
+            article_tag t
+        ON
+            FIND_IN_SET(t.id, a.tag_ids) > 0
+        WHERE
+            t.id = ?
+        GROUP BY
+            article_year, a.id
+        ORDER BY
+            article_year DESC, a.create_time DESC
+        "#);
+
+        let query = sqlx::query(&sql).bind(id);
+        let rows = DBHelper::execute_rows(query).await?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut list: Vec<TagArticle> = Vec::new();
+        for row in rows.iter() {
+            let year: i32 = row.try_get("article_year").unwrap_or_else(|err| {
+                info!("get year err:{:#?}", err);
+                -1
+            });
+
+            let mut article_year = String::new();
+            if year > 0 {
+                article_year = format!("{}", year)
+            }
+
+            list.push(TagArticle {
+                article_id: row.try_get("article_id").unwrap_or(String::new()),
+                article_title: row.try_get("article_title").unwrap_or(String::new()),
+                article_count: row.try_get::<i64, _>("article_count").unwrap_or(0) as u32,
+                article_content: row.try_get("article_content").unwrap_or(String::new()),
+                article_year,
+                article_create_time: row.try_get("article_create_time").unwrap_or(String::new()),
+            })
+        }
+
+        Ok(list)
     }
 }
