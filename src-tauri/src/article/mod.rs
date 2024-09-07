@@ -524,6 +524,7 @@ impl Article {
 
     /// 删除
     pub(crate) async fn delete(id: &str) -> Result<HttpResponse, String> {
+        info!("delete article by id: {}", id);
         let response = Self::get_by_id(id).await?;
         if response.code != 200 {
             return Ok(response);
