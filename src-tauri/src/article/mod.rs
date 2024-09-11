@@ -228,6 +228,8 @@ impl Article {
 
     /// 保存或修改
     pub(crate) async fn save_or_update(article: &Article) -> Result<HttpResponse, String> {
+        info!("save or update params: {:#?}", article);
+
         if article.title.is_empty() {
             return Ok(get_error_response("title is empty !"));
         }
@@ -278,6 +280,8 @@ impl Article {
             }
         }
 
+        info!("save or update new tags: {:#?}", new_tags);
+
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
         let create_time = Utils::get_date(None);
 
@@ -290,6 +294,7 @@ impl Article {
         }
 
         if let Some(id) = &article.id {
+            info!("update ...");
             let response = Self::get_by_id(id).await?;
             if response.code != 200 {
                 return Ok(response);
@@ -298,6 +303,7 @@ impl Article {
             Self::update(&article, &tag_ids, create_time.clone(), &mut query_list).await;
         } else {
             // insert
+            info!("insert ...");
             Self::save(&article, &tag_ids, create_time.clone(), &mut query_list).await;
         }
 
