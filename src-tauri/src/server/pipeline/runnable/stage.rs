@@ -1031,7 +1031,7 @@ impl PipelineRunnableStage {
         }
 
         if installed_commands.contains(&H5_INSTALLED_CMDS[0].to_string()) {
-            Self::send_log(app, &format!("project {} dynamic npm `yarn install`", project_name), server_id, id, order);
+            Self::send_log(app, &format!("project {} dynamic npm `npm install`", project_name), server_id, id, order);
             cmds.push(format!("{} install", H5_INSTALLED_CMDS[0]));
             return Ok((cmds, H5_INSTALLED_CMDS[0].to_string()));
         }

@@ -435,11 +435,12 @@ impl PipelineRunnable {
         // 更新 pipeline 表 status
         let pipeline_query = sqlx::query::<MySql>(
             r#"
-            UPDATE pipeline SET `status` = ?, last_run_id = ?
+            UPDATE pipeline SET `status` = ?, last_run_id = ? WHERE id = ?
         "#,
         )
         .bind(&status)
-        .bind(&runtime_id);
+        .bind(&runtime_id)
+        .bind(&pipe.id);
         query_list.push(pipeline_query);
 
         // 插入到 pipeline_runtime 表
