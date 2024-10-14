@@ -207,7 +207,7 @@ impl Article {
                 COUNT(a.id) as article_count
             FROM
                 article a
-            LEFT JOIN article_tag t ON FIND_IN_SET(t.id, a.tag_ids)
+            -- LEFT JOIN article_tag t ON FIND_IN_SET(t.id, a.tag_ids)
         "#,
         );
 
