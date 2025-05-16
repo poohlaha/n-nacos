@@ -150,15 +150,8 @@ impl Treat<HttpResponse> for Server {
 
         let id = &server.id;
         info!("delete server id: {}", &id);
-        let data: Vec<Server> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        if data.is_empty() {
-            return Ok(get_error_response("删除服务器失败, 该服务器不存在"));
-        }
-
-        let serve = data.get(0).unwrap();
-
+        let serve: Server = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
         let pipeline_list = Pipeline::get_pipeline_list_by_server_id(&serve.id).await?;
-
         let mut query_list: Vec<Query<MySql, MySqlArguments>> = Vec::new();
 
         // 删除 server

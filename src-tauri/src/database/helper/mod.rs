@@ -76,8 +76,14 @@ impl DBHelper {
 
         return match results {
             Ok(servers) => {
-                let data = serde_json::to_value(servers).map_err(|err| Error::Error(err.to_string()).to_string())?;
-                Ok(get_success_response(Some(data)))
+                let data: Option<Value>;
+                if !servers.is_empty() {
+                    data = Some(serde_json::to_value(servers).map_err(|err| Error::Error(err.to_string()).to_string())?);
+                } else {
+                    data = Some(Value::Array(Vec::new()))
+                }
+
+                Ok(get_success_response(data))
             }
             Err(err) => Ok(get_error_response(&err)),
         };

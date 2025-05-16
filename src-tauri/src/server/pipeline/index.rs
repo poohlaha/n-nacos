@@ -1047,7 +1047,8 @@ impl Pipeline {
             return Ok(Vec::new());
         }
 
-        return serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let pipelines: Vec<Pipeline> = serde_json::from_value(response.body).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        Ok(pipelines)
     }
 
     pub(crate) fn delete_by_pipeline(pipeline_id: &str, query_list: &mut Vec<Query<MySql, MySqlArguments>>, is_update_delete: bool) {
