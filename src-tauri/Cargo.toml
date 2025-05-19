@@ -54,6 +54,7 @@ sevenz-rust = "0.6.1"
 mupdf = "0.4"
 calamine = "0.23"
 parking_lot="0.12.3"
+infer = "0.19"
 # images-compressor = "1.0.3"
 
 [dependencies.uuid]
