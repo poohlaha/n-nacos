@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 允许访问用户文档、下载、桌面目录 -->
+  <key>com.apple.security.personal-information.documents</key>
+  <true/>
+  <key>com.apple.security.personal-information.downloads</key>
+  <true/>
+  <key>com.apple.security.personal-information.desktop</key>
+  <true/>
+
+  <!-- 如果需要，启用文件读写权限 -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

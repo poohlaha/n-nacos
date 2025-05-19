@@ -10,6 +10,6 @@ pub enum Error {
 
 impl Error {
     pub(crate) fn convert_string(str: &str) -> String {
-        return Error::Error(str.to_string()).to_string();
+        Error::Error(str.to_string()).to_string()
     }
 }

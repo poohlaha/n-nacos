@@ -53,11 +53,11 @@ where
     }
 
     let data: Result<T, serde_json::Error> = serde_json::from_value(response.body);
-    return match data {
+    match data {
         Ok(data) => Some(data),
         Err(err) => {
             info!("convert response to pipeline error: {:#?}", err);
             None
         }
-    };
+    }
 }

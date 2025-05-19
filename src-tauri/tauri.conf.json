@@ -1,6 +1,6 @@
 {
   "productName": "n-nacos",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "identifier": "n-nacos",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -15,8 +15,8 @@
         "title": "n-nacos",
         "fullscreen": false,
         "resizable": true,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 1024,
+        "minHeight": 960,
         "width": 1024,
         "height": 960
       }
@@ -36,6 +36,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/*", ".env"]
+    "resources": ["resources/*", ".env"],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "exceptionDomain": ""
+    }
   }
 }

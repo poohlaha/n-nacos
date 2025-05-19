@@ -8,11 +8,13 @@ mod event;
 mod exports;
 mod helper;
 mod logger;
+mod look;
 mod prepare;
 mod server;
 mod system;
 mod task;
 
+mod utils;
 // mod db;
 
 use lazy_static::lazy_static;
@@ -24,6 +26,7 @@ use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
 use exports::article::{delete_article, get_archive_article_list, get_article_detail, get_article_list, get_article_tag_classify, get_article_tag_list, get_tag_article_list, save_or_update_article};
+use exports::look::get_recent_used;
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
@@ -124,7 +127,8 @@ async fn main() {
             delete_article,
             get_article_tag_classify,
             get_tag_article_list,
-            get_archive_article_list
+            get_archive_article_list,
+            get_recent_used
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
