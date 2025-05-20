@@ -16,6 +16,7 @@ tauri = { version = "2.5.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.2.1"
 tauri-plugin-dialog = "2.2.1"
 tauri-plugin-log = "2.4.0"
+# tauri_plugin_autostart = "2.3.0"
 
 async-trait = "0.1.81"
 mysql = "25.0.1"

@@ -22,6 +22,8 @@ use rayon::ThreadPoolBuilder;
 
 use crate::database::Database;
 use crate::exports::monitor::{start_monitor, stop_monitor};
+use crate::look::cache::CACHE_TTL_SECONDS;
+use crate::look::home::Look;
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
@@ -33,7 +35,10 @@ use log::info;
 use sqlx::MySql;
 use std::env;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::AppHandle;
+// use tauri_plugin_autostart::MacosLauncher;
+// use tauri_plugin_autostart::ManagerExt;
 
 const PROJECT_NAME: &str = "n-nacos";
 
@@ -74,6 +79,17 @@ fn start_task(app: &AppHandle) {
     });
 }
 
+// 启动定时器来读取目录(downloads)
+fn start_cache_download_dir_timer() {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            info!("loop cache download dir ...");
+            Look::refresh("Downloads").await;
+            tokio::time::sleep(Duration::from_secs(CACHE_TTL_SECONDS as u64)).await;
+        }
+    });
+}
+
 // 日志目录: /Users/xxx/Library/Logs/n-nacos
 // 程序配置目录: /Users/xxx/Library/Application Support/n-nacos
 #[tokio::main]
@@ -87,11 +103,24 @@ async fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::default().build())
+        // .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
         .setup(move |app| {
             // 创建系统托盘
             Tray::builder(app);
 
             let app_handle = app.handle();
+
+            /*
+            // 开机启动
+            // 获取自动启动管理器
+            let autostart_manager = app.autolaunch();
+            // 启用 autostart
+            let _ = autostart_manager.enable();
+            // 检查 enable 状态
+            println!("registered for autostart? {}", autostart_manager.is_enabled().unwrap());
+            // 禁用 autostart
+            // let _ = autostart_manager.disable();
+             */
 
             // 初始化
             tauri::async_runtime::spawn(async move {
@@ -99,6 +128,7 @@ async fn main() {
             });
 
             start_task(&app_handle);
+            start_cache_download_dir_timer();
 
             Ok(())
         })

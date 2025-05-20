@@ -17,7 +17,7 @@ impl FileUtils {
         let now = chrono::Local::now();
         let yesterday = now - Duration::days(1);
         // let yesterday_start = yesterday.date_naive().and_hms_opt(0, 0, 0).unwrap().timestamp();
-        let yesterday_end = yesterday.date_naive().and_hms_opt(23, 59, 59).unwrap().timestamp();
+        let yesterday_end = yesterday.date_naive().and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp();
 
         let entries = fs::read_dir(file_path).map_err(|err| Error::Error(err.to_string()).to_string())?;
         for entry in entries {

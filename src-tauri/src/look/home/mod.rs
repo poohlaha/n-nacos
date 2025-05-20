@@ -6,22 +6,21 @@
 */
 use crate::error::Error;
 use crate::helper::index::Helper;
+use crate::look::cache::{FileCache, FileMeta};
 use crate::prepare::{get_success_response_by_value, HttpResponse};
 use crate::utils::file::FileUtils;
 use crate::utils::Utils;
-use chrono::DateTime;
+use chrono::{DateTime, TimeZone, Utc};
 use futures::future::join_all;
 use handlers::file::FileHandler;
 use log::{error, info};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 // 缩略图目录
 const THUMBNAIL_DIR: &str = "thumbnail";
@@ -32,28 +31,19 @@ const THUMBNAIL_SIZE: u32 = 128;
 // 查询前 50 条记录
 const LIMIT_SIZE: usize = 50;
 
+pub struct Look {}
+
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct Look {
+pub struct FileQuery {
+    #[serde(rename = "currentPage")]
+    pub current_page: usize, // 页码, 从 1 开始
+    #[serde(rename = "pageSize")]
+    pub page_size: usize, // 每页数量
     #[serde(rename = "fileName")]
-    pub file_name: String, // 文件名
-    #[serde(rename = "filePath")]
-    pub file_path: String, // 文件路径
-    #[serde(rename = "fileContentType")]
-    pub file_content_type: String, // 内容类型
-    #[serde(rename = "fileKind")]
-    pub file_kind: String, // 类型描述
-    #[serde(rename = "fileLastUsedDate")]
-    pub file_last_used_date: String, // 最近使用时间
-    #[serde(rename = "fileThumbnailPath")]
-    pub file_thumbnail_path: String, // 缩略图路径
-    #[serde(rename = "fileSize")]
-    pub file_size: Option<String>, // 文件大小
-    #[serde(rename = "fileCreated")]
-    pub file_created: Option<String>, // 创建时间
-    #[serde(rename = "fileUpdated")]
-    pub file_updated: Option<String>, // 修改时间
-    #[serde(rename = "fileType")]
-    pub file_type: String, // 文件类型
+    pub file_name: String, // 名称(模糊匹配)
+    #[serde(rename = "sortBy")]
+    pub sort_by: Option<String>, // 根据修改时间｜创建时间正序号或倒序
+    pub refresh: bool, // 是否强制刷新
 }
 
 impl Look {
@@ -69,7 +59,7 @@ impl Look {
     // 生成缩略图, 调用系统的 qlmanage 来生成, 有权限问题
     #[allow(dead_code)]
     fn generate_thumbnail(file_path: &str, file_name: &str, size: u32) -> Result<String, String> {
-        let out_dir = Look::get_thumbnail_dir(size);
+        let out_dir = Self::get_thumbnail_dir(size);
 
         if let Some(out_dir) = out_dir {
             // 查看目录下缩略图是否存在
@@ -115,15 +105,26 @@ impl Look {
     }
 
     // 最近查看
-    pub async fn get_recent_used() -> Result<HttpResponse, String> {
+    pub async fn get_recent_used(file_query: &FileQuery) -> Result<HttpResponse, String> {
+        let mut size = file_query.page_size;
+        if size == 0 {
+            size = LIMIT_SIZE;
+        }
+
+        let search_name = &file_query.file_name;
+
         // 用户目录
         let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string())?;
 
-        let query = "kMDItemLastUsedDate != NULL && kMDItemLastUsedDate >= $time.today(-7d) && !(kMDItemContentTypeTree == 'com.apple.application-bundle' || kMDItemContentTypeTree == 'com.apple.installer-package-archive' || kMDItemContentTypeTree == 'public.executable' || kMDItemContentTypeTree == 'com.apple.disk-image')";
+        let mut query = String::new();
+        if !search_name.is_empty() {
+            query = format!("kMDItemFSName == \"*{}*\"", search_name);
+        }
 
+        query.push_str("kMDItemLastUsedDate != NULL && kMDItemLastUsedDate >= $time.today(-15d) && !(kMDItemContentTypeTree == 'com.apple.application-bundle' || kMDItemContentTypeTree == 'com.apple.installer-package-archive' || kMDItemContentTypeTree == 'public.executable' || kMDItemContentTypeTree == 'com.apple.disk-image')");
         let folders = vec!["Documents", "Downloads", "Desktop", "Pictures"];
         let mut cmd = Command::new("mdfind");
-        cmd.arg(query);
+        cmd.arg(query.clone());
 
         let handles: Vec<_> = folders
             .into_iter()
@@ -172,7 +173,7 @@ impl Look {
             // stdout.lines() 返回的是 普通迭代器（同步的）
             // par_bridge() 是 rayon 提供的工具，它把一个普通迭代器变成并行迭代器
             stdout.lines().par_bridge().for_each(|path| {
-                if counter.load(Ordering::Relaxed) >= LIMIT_SIZE {
+                if counter.load(Ordering::Relaxed) >= size {
                     return;
                 }
 
@@ -181,21 +182,37 @@ impl Look {
                 }
 
                 let mdls = Command::new("mdls")
-                    .args(["-name", "kMDItemDisplayName", "-name", "kMDItemContentType", "-name", "kMDItemKind", "-name", "kMDItemLastUsedDate", "-name", "kMDItemPath", path])
+                    .args([
+                        "-name",
+                        "kMDItemDisplayName",
+                        "-name",
+                        "kMDItemContentType",
+                        "-name",
+                        "kMDItemKind",
+                        "-name",
+                        "kMDItemContentCreationDate",
+                        "-name",
+                        "kMDItemLastUsedDate",
+                        "-name",
+                        "kMDItemLogicalSize",
+                        "-name",
+                        "kMDItemPath",
+                        path,
+                    ])
                     .output();
 
                 if let Ok(output) = mdls {
                     let text = String::from_utf8_lossy(&output.stdout);
-                    let mut info = Look {
+                    let mut info = FileMeta {
+                        file_key: path.to_string(),
                         file_name: String::new(),
                         file_path: path.to_string(),
                         file_content_type: String::new(),
                         file_kind: String::new(),
-                        file_last_used_date: String::new(),
                         file_thumbnail_path: String::new(),
                         file_size: None,
-                        file_created: None,
-                        file_updated: None,
+                        file_created: String::new(),
+                        file_updated: String::new(),
                         file_type: String::new(),
                     };
 
@@ -207,7 +224,15 @@ impl Look {
                         } else if line.contains("kMDItemKind") {
                             info.file_kind = line.split('=').nth(1).unwrap_or("").trim().to_string();
                         } else if line.contains("kMDItemLastUsedDate") {
-                            info.file_last_used_date = line.split('=').nth(1).unwrap_or("").trim().to_string();
+                            let file_updated = line.split('=').nth(1).unwrap_or("").trim().to_string();
+                            info.file_updated = Self::parse_date(&file_updated);
+                        } else if line.contains("kMDItemContentCreationDate") {
+                            let file_created = line.split('=').nth(1).unwrap_or("").trim().to_string();
+                            info.file_created = Self::parse_date(&file_created);
+                        } else if line.contains("kMDItemLogicalSize") {
+                            let size_str = line.split('=').nth(1).unwrap_or("").trim().to_string();
+                            let size: u64 = size_str.parse::<u64>().unwrap_or(0);
+                            info.file_size = Some(FileUtils::convert_size(size))
                         }
                     }
 
@@ -226,7 +251,7 @@ impl Look {
                         }
                     }
 
-                    if counter.fetch_add(1, Ordering::SeqCst) < LIMIT_SIZE {
+                    if counter.fetch_add(1, Ordering::SeqCst) < size {
                         let mut lock = results.lock().unwrap();
                         lock.push(info);
                     }
@@ -236,144 +261,72 @@ impl Look {
 
         let mut results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
         // 按时间排序
-        results.sort_by(|a, b| b.file_last_used_date.cmp(&a.file_last_used_date));
+        results.sort_by(|a, b| FileCache::parse_datetime(&b.file_updated).cmp(&FileCache::parse_datetime(&a.file_updated)));
         get_success_response_by_value(results)
+    }
+
+    fn parse_date(date_str: &str) -> String {
+        DateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S %z")
+            .map(|dt| dt.with_timezone(&Utc))
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to parse date: {}, error: {}", date_str, e);
+                Utc.timestamp_opt(0, 0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string()
+            })
+            .to_string()
     }
 
     // 读取文稿
-    pub fn read_documents() -> Result<HttpResponse, String> {
+    pub fn read_documents(file_query: &FileQuery) -> Result<HttpResponse, String> {
         let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string())?;
         let mut path = PathBuf::from(&home);
         path.push("Documents");
-        let results = Look::read_file_dir(&path)?;
-        get_success_response_by_value(results)
+        let file_info = FileCache::query(&path, "Documents", file_query);
+        get_success_response_by_value(file_info)
     }
 
     // 读取图片
-    pub fn read_pictures() -> Result<HttpResponse, String> {
+    pub fn read_pictures(file_query: &FileQuery) -> Result<HttpResponse, String> {
         let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string())?;
         let mut path = PathBuf::from(&home);
         path.push("Pictures");
-        let results = Look::read_file_dir(&path)?;
-        get_success_response_by_value(results)
+        let file_info = FileCache::query(&path, "Pictures", file_query);
+        get_success_response_by_value(file_info)
     }
 
     // 读取桌面
-    pub fn read_desktop() -> Result<HttpResponse, String> {
+    pub fn read_desktop(file_query: &FileQuery) -> Result<HttpResponse, String> {
         let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string())?;
         let mut path = PathBuf::from(&home);
         path.push("Desktop");
-        let results = Look::read_file_dir(&path)?;
-        get_success_response_by_value(results)
+        let file_info = FileCache::query(&path, "Desktop", file_query);
+        get_success_response_by_value(file_info)
     }
 
     // 读取下载
-    pub fn read_download() -> Result<HttpResponse, String> {
+    pub fn read_download(file_query: &FileQuery) -> Result<HttpResponse, String> {
         let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string())?;
         let mut path = PathBuf::from(&home);
         path.push("Downloads");
-        let results = Look::read_file_dir(&path)?;
-        get_success_response_by_value(results)
+        let file_info = FileCache::query(&path, "Downloads", file_query);
+        get_success_response_by_value(file_info)
     }
 
-    // 读取目录
-    fn read_file_dir(path: &PathBuf) -> Result<Vec<Look>, String> {
-        let entries = fs::read_dir(path).map_err(|err| Error::Error(err.to_string()).to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+    // 刷新
+    pub async fn refresh(dir: &str) {
+        let home = std::env::var("HOME").map_err(|err| Error::Error(err.to_string()).to_string()).unwrap_or(String::new());
+        let mut path = PathBuf::from(&home);
+        if !path.exists() {
+            error!("user home dir `{}` is not exists", home);
+            return;
+        }
 
-        let mut results: Vec<Look> = entries
-            .into_par_iter()
-            .filter_map(|entry| {
-                let path = entry.path();
-                let file_path = path.to_string_lossy().to_string();
-                let metadata = entry.metadata().map_err(|err| Error::Error(err.to_string()).to_string());
-                let metadata = match metadata {
-                    Ok(metadata) => Some(metadata),
-                    Err(err) => {
-                        error!("read metadata error: {:#?}", err);
-                        None
-                    }
-                };
+        path.push(dir);
+        if !path.exists() {
+            error!("refresh dir dir `{:?}` is not exists", path);
+            return;
+        }
 
-                if metadata.is_none() {
-                    return None;
-                }
-
-                let metadata = metadata.unwrap();
-                let created = metadata.created().ok().and_then(|t| Look::system_time_to_string(t).ok()).unwrap_or_else(|| "".to_string());
-                let modified = metadata.modified().ok().and_then(|t| Look::system_time_to_string(t).ok()).unwrap_or_else(|| "".to_string());
-                let filename = path.clone().file_name().unwrap_or(OsStr::new("")).to_string_lossy().to_string();
-                if filename.ends_with("Library.photoslibrary") {
-                    return None
-                }
-
-                if path.is_dir() {
-                    return Some(Look {
-                        file_name: filename.clone(),
-                        file_path: file_path.clone(),
-                        file_content_type: "".to_string(),
-                        file_kind: "DIR".to_string(),
-                        file_last_used_date: modified.clone(),
-                        file_thumbnail_path: "".to_string(),
-                        file_size: Some(FileUtils::convert_size(metadata.len())),
-                        file_created: Some(created),
-                        file_updated: Some(modified),
-                        file_type: "DIR".to_string(),
-                    });
-                }
-
-                // let metadata = fs::metadata(&path).map_err(|err| Error::Error(err.to_string()).to_string());
-
-                // 使用 infer 来识别 MIME 类型
-                let kind = infer::get_from_path(&path).ok().flatten().map(|info| info.mime_type().to_string()).unwrap_or_else(|| {
-                    // 退化方案：用扩展名推断
-                    path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_string()
-                });
-
-                if kind.is_empty() || kind.to_lowercase() == "photoslibrary" {
-                    return None;
-                }
-
-                // 过滤可执行文件（macOS 上 `.app` 是目录，不会出现在这里；.exe/.bin 类扩展可拦）
-                if kind.contains("application/octet-stream") || kind.contains("x-executable") {
-                    return None;
-                }
-
-                let mut info = Look {
-                    file_name: filename.clone(),
-                    file_path: file_path.clone(),
-                    file_content_type: "".to_string(),
-                    file_kind: kind.clone(),
-                    file_last_used_date: modified.clone(),
-                    file_thumbnail_path: "".to_string(),
-                    file_size: Some(FileUtils::convert_size(metadata.len())),
-                    file_created: Some(created),
-                    file_updated: Some(modified),
-                    file_type: "FILE".to_string(),
-                };
-
-                if kind.starts_with("image/") {
-                    let contents = FileHandler::read_file_buffer(&file_path);
-                    match contents {
-                        Ok(contents) => {
-                            info.file_thumbnail_path = Utils::generate_image(contents);
-                        }
-                        Err(err) => {
-                            error!("read `{:?}` error: {:#?}", &file_path, err);
-                        }
-                    }
-                }
-
-                Some(info)
-            })
-            .collect();
-
-        // 按修改时间倒序
-        results.sort_by(|a, b| b.file_updated.cmp(&a.file_updated));
-        Ok(results)
-    }
-
-    fn system_time_to_string(time: SystemTime) -> Result<String, std::time::SystemTimeError> {
-        let datetime: DateTime<chrono::Local> = time.into();
-        Ok(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+        FileCache::refresh(&path, dir);
     }
 }
