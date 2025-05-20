@@ -36,7 +36,7 @@ use sqlx::MySql;
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 // use tauri_plugin_autostart::MacosLauncher;
 // use tauri_plugin_autostart::ManagerExt;
 
@@ -105,10 +105,26 @@ async fn main() {
         .plugin(tauri_plugin_log::Builder::default().build())
         // .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
         .setup(move |app| {
-            // 创建系统托盘
-            Tray::builder(app);
-
             let app_handle = app.handle();
+
+            // 创建系统托盘
+            Tray::builder(&app_handle);
+
+
+            // ✅ 获取主窗口（必须是窗口 label 一致）
+            if let Some(window) = app.get_webview_window("main") {
+                let app_handle_clone = app_handle.clone();
+
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close(); // 阻止关闭
+                        if let Some(win) = app_handle_clone.get_webview_window("main") {
+                            let _ = win.hide(); // 最小化到托盘
+                        }
+                    }
+
+                });
+            }
 
             /*
             // 开机启动

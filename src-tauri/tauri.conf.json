@@ -18,7 +18,11 @@
         "minWidth": 1024,
         "minHeight": 960,
         "width": 1024,
-        "height": 960
+        "height": 960,
+        "minimizable": true,
+        "closable": true,
+        "skipTaskbar": false,
+        "decorations": true
       }
     ],
     "security": {
