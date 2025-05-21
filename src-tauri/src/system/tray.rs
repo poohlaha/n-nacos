@@ -2,7 +2,7 @@
 
 use log::{error, info};
 use tauri::menu::{IsMenuItem, Menu, MenuItem};
-use tauri::tray::{TrayIconBuilder};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Wry};
 
 pub struct Tray;
@@ -27,9 +27,27 @@ impl Tray {
                 }
                 "show" => {
                     info!("show menu item was clicked");
-                    let window = app.get_webview_window("main").unwrap();
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.show();
+                        // let _ = win.set_focus();
+
+                        #[cfg(target_os = "macos")]
+                        {
+                            use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
+                            unsafe {
+                                let ns_app = NSApp();
+
+                                // 临时允许激活窗口
+                                ns_app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular);
+
+                                // 显示并保持窗口前置
+                                let _ = win.set_focus(); // 这个 set_focus 是 tauri 的 API
+
+                                // 再隐藏 Dock 图标
+                                // ns_app.setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyProhibited);
+                            }
+                        }
+                    }
                 }
                 _ => {
                     info!("menu item {:?} not handled", event.id);
@@ -53,8 +71,8 @@ impl Tray {
 
     // 创建菜单
     fn create_menus(app: &AppHandle) -> Option<Menu<Wry>> {
-        let quit_menu = Self::create_menu(app, "quit", "退出");
-        let show_menu = Self::create_menu(app, "show", "显示");
+        let quit_menu = Self::create_menu(app, "quit", "退出程序");
+        let show_menu = Self::create_menu(app, "show", "显示主界面");
 
         let mut boxed_items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
         if let Some(quit_menu) = quit_menu {

@@ -98,33 +98,24 @@ async fn main() {
     Database::create_db().await.unwrap();
 
     // tauri
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         // .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let window = app.get_webview_window("main");
+            if let Some(window) = window {
+                window.show().unwrap();
+                window.set_focus().unwrap();
+            }
+        }))
         // .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
         .setup(move |app| {
             let app_handle = app.handle();
 
             // 创建系统托盘
             Tray::builder(&app_handle);
-
-
-            // ✅ 获取主窗口（必须是窗口 label 一致）
-            if let Some(window) = app.get_webview_window("main") {
-                let app_handle_clone = app_handle.clone();
-
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close(); // 阻止关闭
-                        if let Some(win) = app_handle_clone.get_webview_window("main") {
-                            let _ = win.hide(); // 最小化到托盘
-                        }
-                    }
-
-                });
-            }
 
             /*
             // 开机启动
@@ -148,6 +139,34 @@ async fn main() {
 
             Ok(())
         })
+        .on_window_event(|app, event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                info!("focused false...");
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close(); // 阻止关闭
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.hide(); // 最小化到托盘
+                }
+
+                // 隐藏 Dock 图标
+                // NSApplicationActivationPolicy::Prohibited: 不会显示在 Dock，无法成为活跃应用，无法接受键盘输入
+                #[cfg(target_os = "macos")]
+                {
+                    use cocoa::appkit::NSApplication;
+                    unsafe {
+                        let ns_app = cocoa::appkit::NSApp();
+                        ns_app.setActivationPolicy_(cocoa::appkit::NSApplicationActivationPolicy::NSApplicationActivationPolicyProhibited);
+                    }
+                }
+            }
+        });
+
+    let mut app = builder
         .invoke_handler(tauri::generate_handler![
             get_server_list,
             insert_server,
@@ -180,6 +199,22 @@ async fn main() {
             get_pictures_list,
             get_download_list
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+
+
+    app.run(move |app, event| match &event {
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            info!("reopen window");
+            if !has_visible_windows {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                }
+            }
+        }
+        _ => (),
+    });
 }
