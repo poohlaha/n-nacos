@@ -33,7 +33,6 @@ use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail,
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use log::info;
 use sqlx::MySql;
-use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -102,7 +101,12 @@ async fn main() {
         // .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
             let window = app.get_webview_window("main");
             if let Some(window) = window {
@@ -110,6 +114,7 @@ async fn main() {
                 window.set_focus().unwrap();
             }
         }))
+        // .manage(tauri_plugin_positioner::Tray::default()) // 必须添加这一行
         // .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
         .setup(move |app| {
             let app_handle = app.handle();

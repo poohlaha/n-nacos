@@ -1,13 +1,14 @@
 //! 托盘
 
 use crate::error::Error;
-use log::{error, info};
+use log::error;
 use plist::Value;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, Wry};
+use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, PhysicalPosition, Wry};
 
 pub struct Tray;
 
@@ -29,6 +30,7 @@ impl Tray {
            // .on_tray_icon_event(Self::on_tray_icon_event)
             ;
 
+        /*
         if let Some(menus) = menus {
             tray = tray.menu(&menus).show_menu_on_left_click(true).on_menu_event(|app, event| match event.id.as_ref() {
                 "quit" => {
@@ -64,8 +66,34 @@ impl Tray {
                 }
             });
         }
+         */
 
-        tray.build(app).unwrap();
+        let app_clone = Arc::new(app.clone());
+        tray.on_tray_icon_event(move |_, event| {
+            let app_cloned = Arc::clone(&app_clone);
+            // tauri_plugin_positioner::on_tray_event(app.app_handle(), &event);
+            match event {
+                TrayIconEvent::Click { id: _, rect: _, button, position, .. } => match button {
+                    MouseButton::Left {} => {
+                        log::info!("left clicked");
+                        Self::send_tray_menu_message(&*app_cloned, position)
+                    }
+                    MouseButton::Right {} => {}
+                    _ => {}
+                },
+                TrayIconEvent::DoubleClick { .. } => {}
+                TrayIconEvent::Enter { .. } => {}
+                TrayIconEvent::Move { .. } => {}
+                TrayIconEvent::Leave { .. } => {}
+                _ => {}
+            }
+        })
+        .build(app)
+        .unwrap();
+    }
+
+    fn send_tray_menu_message(app: &AppHandle, position: PhysicalPosition<f64>) {
+        app.emit("tray_contextmenu", position).unwrap();
     }
 
     fn create_menu(app: &AppHandle, id: &str, text: &str) -> Option<MenuItem<Wry>> {
@@ -133,7 +161,11 @@ impl Tray {
                 if path.extension().and_then(|s| s.to_str()) == Some("app") {
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                         let icon = Self::get_app_icon_path(&path);
-                        let mut application = ApplicationApp { icon: None, path: path.clone(), name: name.to_string() };
+                        let mut application = ApplicationApp {
+                            icon: None,
+                            path: path.clone(),
+                            name: name.to_string(),
+                        };
 
                         match icon {
                             Ok(icon) => {

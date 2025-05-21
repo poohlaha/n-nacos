@@ -1,7 +1,7 @@
 {
   "productName": "n-nacos",
   "version": "1.0.0",
-  "identifier": "n-nacos",
+  "identifier": "com.nacos.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:9000",
@@ -9,6 +9,7 @@
     "frontendDist": "../../n-nacos-web/dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
@@ -22,17 +23,21 @@
         "minimizable": true,
         "closable": true,
         "skipTaskbar": false,
-        "decorations": true
+        "decorations": false
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": [
+        "default-capability",
+        "desktop-capability"
+      ]
     }
   },
   "bundle": {
     "publisher": "poohlaha",
     "active": true,
     "targets": "all",
+    "licenseFile": "./LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
