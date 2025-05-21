@@ -7,6 +7,10 @@
     "core:default",
     "shell:allow-open",
     "log:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "allow-open-url"
+  ],
+  "capabilities": [
+
   ]
 }

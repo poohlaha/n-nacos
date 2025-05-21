@@ -62,7 +62,7 @@ lazy_static! {
 /// 初始化一些属性
 async fn init() {
     // 设置并行任务最大数
-    ThreadPoolBuilder::new().num_threads(MAX_THREAD_COUNT as usize).build_global().unwrap();
+    ThreadPoolBuilder::new().num_threads(MAX_THREAD_COUNT as usize).build_global().expect("Failed to build global thread pool");
 
     // 从数据库读取任务
     Pool::get_pools().await;
@@ -103,7 +103,7 @@ async fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::default().build())
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
             let window = app.get_webview_window("main");
             if let Some(window) = window {
                 window.show().unwrap();
@@ -202,12 +202,8 @@ async fn main() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
 
-
     app.run(move |app, event| match &event {
-        tauri::RunEvent::Reopen {
-            has_visible_windows,
-            ..
-        } => {
+        tauri::RunEvent::Reopen { has_visible_windows, .. } => {
             info!("reopen window");
             if !has_visible_windows {
                 if let Some(win) = app.get_webview_window("main") {

@@ -1,3 +1,6 @@
+/**!
+  缓存到磁盘
+*/
 use crate::error::Error;
 use crate::helper::index::Helper;
 use crate::look::home::FileQuery;
@@ -7,9 +10,6 @@ use handlers::file::FileHandler;
 use log::{error, info};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-/**!
-  缓存到磁盘
-*/
 use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;

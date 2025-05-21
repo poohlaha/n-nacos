@@ -20,6 +20,8 @@ tauri-plugin-autostart = "2.3.0"
 tauri-plugin-single-instance = "2.2.4"
 objc = "0.2.7"
 cocoa = "0.26"
+opener = "0.7.2"
+plist = "1.7.1"
 
 async-trait = "0.1.81"
 mysql = "25.0.1"

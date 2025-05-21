@@ -1,13 +1,23 @@
 //! 托盘
 
+use crate::error::Error;
 use log::{error, info};
-use tauri::menu::{IsMenuItem, Menu, MenuItem};
+use plist::Value;
+use std::fs;
+use std::path::PathBuf;
+use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Wry};
 
 pub struct Tray;
 
 const TRAY_ICON_ID: &str = "__TRAY__";
+
+struct ApplicationApp {
+    icon: Option<String>, // 应用程序图标
+    path: PathBuf,        // 应用程序位置
+    name: String,         // 应用程序名称
+}
 
 impl Tray {
     // 创建系统托盘
@@ -59,11 +69,22 @@ impl Tray {
     }
 
     fn create_menu(app: &AppHandle, id: &str, text: &str) -> Option<MenuItem<Wry>> {
-        let quit_menu = MenuItem::with_id(app, id, text, true, None::<&str>);
-        match quit_menu {
-            Ok(quit_menu) => Some(quit_menu),
+        let menu = MenuItem::with_id(app, id, text, true, None::<&str>);
+        match menu {
+            Ok(menu) => Some(menu),
             Err(err) => {
-                error!("create quite menu error: {:#?}", err);
+                error!("create `{}` menu error: {:#?}", text, err);
+                None
+            }
+        }
+    }
+
+    fn create_menu_with_sub_menu(app: &AppHandle, id: &str, text: &str, submenu: Vec<&dyn IsMenuItem<Wry>>) -> Option<Submenu<Wry>> {
+        let menu = Submenu::with_id_and_items(app, id, text, true, &submenu);
+        match menu {
+            Ok(menu) => Some(menu),
+            Err(err) => {
+                error!("create `{}` menu with submenu error: {:#?}", text, err);
                 None
             }
         }
@@ -73,6 +94,7 @@ impl Tray {
     fn create_menus(app: &AppHandle) -> Option<Menu<Wry>> {
         let quit_menu = Self::create_menu(app, "quit", "退出程序");
         let show_menu = Self::create_menu(app, "show", "显示主界面");
+        let app_menu = Self::create_app_menus(app);
 
         let mut boxed_items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
         if let Some(quit_menu) = quit_menu {
@@ -83,12 +105,110 @@ impl Tray {
             boxed_items.push(Box::new(show_menu));
         }
 
+        if let Some(app_menu) = app_menu {
+            boxed_items.push(Box::new(app_menu));
+        }
+
         let menus: Vec<&dyn IsMenuItem<Wry>> = boxed_items.iter().map(|i| i.as_ref()).collect();
         let menus = Menu::with_items(app, &menus);
         match menus {
             Ok(menus) => Some(menus),
             Err(err) => {
                 error!("create menus error: {:#?}", err);
+                None
+            }
+        }
+    }
+
+    // 获取本机上的所有应用程序
+    fn get_applications() -> Result<Vec<ApplicationApp>, String> {
+        let applications_dir = PathBuf::from("/Applications");
+        let entries = fs::read_dir(applications_dir).map_err(|err| Error::Error(err.to_string()).to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+        let apps: Vec<ApplicationApp> = entries
+            .iter()
+            .filter_map(|entry| {
+                let path = entry.path();
+                // let file_path = path.to_string_lossy().to_string();
+                if path.extension().and_then(|s| s.to_str()) == Some("app") {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        let icon = Self::get_app_icon_path(&path);
+                        let mut application = ApplicationApp { icon: None, path: path.clone(), name: name.to_string() };
+
+                        match icon {
+                            Ok(icon) => {
+                                application.icon = Some(icon);
+                            }
+                            Err(_) => {}
+                        };
+
+                        return Some(application);
+                    }
+                }
+
+                None
+            })
+            .collect();
+
+        Ok(apps)
+    }
+
+    // 获取 app 应用图标, 读取 `Info.plist` 中的字段 `CFBundleIconFile` 的值, 然后在 Resources 中查找
+    fn get_app_icon_path(app_path: &PathBuf) -> Result<String, String> {
+        let plist_path = app_path.join("Contents").join("Info.plist");
+        let plist_data = fs::read(plist_path).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        let plist: Value = plist::from_bytes(&plist_data).map_err(|err| Error::Error(err.to_string()).to_string())?;
+
+        let dir = plist.as_dictionary();
+        if let Some(dir) = dir {
+            let value = dir.get("CFBundleIconFile");
+            if let Some(value) = value {
+                let icon_file = value.as_string();
+                if let Some(icon_file) = icon_file {
+                    // 添加 `.icns` 后缀（Info.plist 里通常不带）
+                    let mut icon_name = icon_file.to_string();
+                    if !icon_name.ends_with(".icns") {
+                        icon_name.push_str(".icns");
+                    }
+
+                    let icon_path = app_path.join("Contents").join("Resources").join(icon_name);
+                    if icon_path.exists() {
+                        return Ok(icon_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        Ok(String::new())
+    }
+
+    fn create_app_submenus(app: &AppHandle, apps: Vec<ApplicationApp>) -> Option<Submenu<Wry>> {
+        if apps.is_empty() {
+            return None;
+        }
+
+        let menus: Vec<Box<dyn IsMenuItem<Wry>>> = apps
+            .into_iter()
+            .filter_map(|application_app: ApplicationApp| {
+                let app_menu = Self::create_menu(app, &application_app.name, &application_app.name);
+                if let Some(menu) = app_menu {
+                    return Some(Box::new(menu) as Box<dyn IsMenuItem<Wry>>);
+                }
+                None
+            })
+            .collect();
+
+        let menus: Vec<&dyn IsMenuItem<Wry>> = menus.iter().map(|i| i.as_ref()).collect();
+        Self::create_menu_with_sub_menu(app, "apps", "打开应用程序", menus)
+    }
+
+    // 创建 apps 菜单
+    fn create_app_menus(app: &AppHandle) -> Option<Submenu<Wry>> {
+        let apps = Self::get_applications();
+        match apps {
+            Ok(apps) => Self::create_app_submenus(app, apps),
+            Err(err) => {
+                error!("read application app error: {:#?}", err);
                 None
             }
         }
