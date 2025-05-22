@@ -81,7 +81,8 @@
 
     "websocket:default",
     "websocket:allow-connect",
-    "websocket:allow-send"
+    "websocket:allow-send",
+    "log:default"
   ],
   "local": true,
   "remote": {
