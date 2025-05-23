@@ -14,6 +14,7 @@ mod server;
 mod system;
 mod task;
 
+mod setting;
 mod utils;
 // mod db;
 
@@ -31,13 +32,12 @@ use exports::article::{delete_article, get_archive_article_list, get_article_det
 use exports::look::{get_desktop_list, get_document_list, get_download_list, get_pictures_list, get_recent_used};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
+use exports::settings::{get_setting, save_setting};
 use log::info;
 use sqlx::MySql;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
-// use tauri_plugin_autostart::MacosLauncher;
-// use tauri_plugin_autostart::ManagerExt;
 
 const PROJECT_NAME: &str = "n-nacos";
 
@@ -97,7 +97,7 @@ async fn main() {
     Database::create_db().await.unwrap();
 
     // tauri
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -114,8 +114,7 @@ async fn main() {
                 window.set_focus().unwrap();
             }
         }))
-        // .manage(tauri_plugin_positioner::Tray::default()) // 必须添加这一行
-        // .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--flag1", "--flag2"])))
         .setup(move |app| {
             let app_handle = app.handle();
 
@@ -171,7 +170,7 @@ async fn main() {
             }
         });
 
-    let mut app = builder
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             get_server_list,
             insert_server,
@@ -202,7 +201,9 @@ async fn main() {
             get_desktop_list,
             get_document_list,
             get_pictures_list,
-            get_download_list
+            get_download_list,
+            save_setting,
+            get_setting,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

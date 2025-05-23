@@ -62,7 +62,7 @@ impl FileCache {
     fn get_cache_dir(dir: &str) -> Option<PathBuf> {
         let dir = Helper::get_project_config_dir(vec![CACHE_FILE_DIR.to_string(), dir.to_string()]);
         dir.unwrap_or_else(|err| {
-            error!("get thumbnail dir error: {}", err);
+            error!("get look cache dir error: {}", err);
             None
         })
     }

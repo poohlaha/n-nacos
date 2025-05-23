@@ -23,8 +23,8 @@ struct ApplicationApp {
 impl Tray {
     // 创建系统托盘
     pub fn builder(app: &AppHandle) {
-        let menus = Self::create_menus(app);
-        let mut tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
+        // let menus = Self::create_menus(app);
+        let tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
             .icon(app.default_window_icon().unwrap().clone())
             .icon_as_template(true)
            // .on_tray_icon_event(Self::on_tray_icon_event)
