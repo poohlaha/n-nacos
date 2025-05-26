@@ -1,10 +1,6 @@
 //! 托盘
 
-use crate::error::Error;
 use log::error;
-use plist::Value;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
@@ -13,12 +9,6 @@ use tauri::{AppHandle, Emitter, PhysicalPosition, Wry};
 pub struct Tray;
 
 const TRAY_ICON_ID: &str = "__TRAY__";
-
-struct ApplicationApp {
-    icon: Option<String>, // 应用程序图标
-    path: PathBuf,        // 应用程序位置
-    name: String,         // 应用程序名称
-}
 
 impl Tray {
     // 创建系统托盘
@@ -118,6 +108,7 @@ impl Tray {
         }
     }
 
+    /*
     // 创建菜单
     fn create_menus(app: &AppHandle) -> Option<Menu<Wry>> {
         let quit_menu = Self::create_menu(app, "quit", "退出程序");
@@ -146,72 +137,6 @@ impl Tray {
                 None
             }
         }
-    }
-
-    // 获取本机上的所有应用程序
-    fn get_applications() -> Result<Vec<ApplicationApp>, String> {
-        let applications_dir = PathBuf::from("/Applications");
-        let entries = fs::read_dir(applications_dir).map_err(|err| Error::Error(err.to_string()).to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
-
-        let apps: Vec<ApplicationApp> = entries
-            .iter()
-            .filter_map(|entry| {
-                let path = entry.path();
-                // let file_path = path.to_string_lossy().to_string();
-                if path.extension().and_then(|s| s.to_str()) == Some("app") {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        let icon = Self::get_app_icon_path(&path);
-                        let mut application = ApplicationApp {
-                            icon: None,
-                            path: path.clone(),
-                            name: name.to_string(),
-                        };
-
-                        match icon {
-                            Ok(icon) => {
-                                application.icon = Some(icon);
-                            }
-                            Err(_) => {}
-                        };
-
-                        return Some(application);
-                    }
-                }
-
-                None
-            })
-            .collect();
-
-        Ok(apps)
-    }
-
-    // 获取 app 应用图标, 读取 `Info.plist` 中的字段 `CFBundleIconFile` 的值, 然后在 Resources 中查找
-    fn get_app_icon_path(app_path: &PathBuf) -> Result<String, String> {
-        let plist_path = app_path.join("Contents").join("Info.plist");
-        let plist_data = fs::read(plist_path).map_err(|err| Error::Error(err.to_string()).to_string())?;
-        let plist: Value = plist::from_bytes(&plist_data).map_err(|err| Error::Error(err.to_string()).to_string())?;
-
-        let dir = plist.as_dictionary();
-        if let Some(dir) = dir {
-            let value = dir.get("CFBundleIconFile");
-            if let Some(value) = value {
-                let icon_file = value.as_string();
-                if let Some(icon_file) = icon_file {
-                    // 添加 `.icns` 后缀（Info.plist 里通常不带）
-                    let mut icon_name = icon_file.to_string();
-                    if !icon_name.ends_with(".icns") {
-                        icon_name.push_str(".icns");
-                    }
-
-                    let icon_path = app_path.join("Contents").join("Resources").join(icon_name);
-                    if icon_path.exists() {
-                        return Ok(icon_path.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-
-        Ok(String::new())
     }
 
     fn create_app_submenus(app: &AppHandle, apps: Vec<ApplicationApp>) -> Option<Submenu<Wry>> {
@@ -245,6 +170,7 @@ impl Tray {
             }
         }
     }
+     */
 
     // 托盘图标点击事件
     /*

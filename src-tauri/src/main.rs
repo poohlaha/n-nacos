@@ -14,6 +14,7 @@ mod server;
 mod system;
 mod task;
 
+mod applications;
 mod setting;
 mod utils;
 // mod db;
@@ -28,6 +29,7 @@ use crate::look::home::Look;
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
+use exports::applications::get_application_list;
 use exports::article::{delete_article, get_archive_article_list, get_article_detail, get_article_list, get_article_tag_classify, get_article_tag_list, get_tag_article_list, save_or_update_article};
 use exports::look::{get_desktop_list, get_document_list, get_download_list, get_pictures_list, get_recent_used};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
@@ -107,6 +109,7 @@ async fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_positioner::init())
+        // .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
             let window = app.get_webview_window("main");
             if let Some(window) = window {
@@ -159,6 +162,7 @@ async fn main() {
 
                 // 隐藏 Dock 图标
                 // NSApplicationActivationPolicy::Prohibited: 不会显示在 Dock，无法成为活跃应用，无法接受键盘输入
+                /*
                 #[cfg(target_os = "macos")]
                 {
                     use cocoa::appkit::NSApplication;
@@ -167,6 +171,7 @@ async fn main() {
                         ns_app.setActivationPolicy_(cocoa::appkit::NSApplicationActivationPolicy::NSApplicationActivationPolicyProhibited);
                     }
                 }
+                 */
             }
         });
 
@@ -204,6 +209,7 @@ async fn main() {
             get_download_list,
             save_setting,
             get_setting,
+            get_application_list
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
