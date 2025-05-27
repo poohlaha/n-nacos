@@ -214,6 +214,7 @@ impl Look {
                         file_created: String::new(),
                         file_updated: String::new(),
                         file_type: String::new(),
+                        file_hash: "".to_string(),
                     };
 
                     for line in text.lines() {
@@ -234,6 +235,11 @@ impl Look {
                             let size: u64 = size_str.parse::<u64>().unwrap_or(0);
                             info.file_size = Some(FileUtils::convert_size(size))
                         }
+                    }
+
+                    if !info.file_created.is_empty() {
+                        let timestamp = Self::get_timestamp(&info.file_created);
+                        info.file_hash = FileCache::generate_file_hash(&info.file_path, timestamp.to_string().as_str());
                     }
 
                     // 过滤类型：排除 app/exe/dylib 安装类，保留图片、压缩包、文本等
@@ -270,10 +276,14 @@ impl Look {
             .map(|dt| dt.with_timezone(&Utc))
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_else(|e| {
-                eprintln!("Failed to parse date: {}, error: {}", date_str, e);
+                error!("Failed to parse date: {}, error: {}", date_str, e);
                 Utc.timestamp_opt(0, 0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string()
             })
             .to_string()
+    }
+
+    fn get_timestamp(date_str: &str) -> i64 {
+        DateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S %z").map(|dt| dt.timestamp()).unwrap_or(0)
     }
 
     // 读取文稿

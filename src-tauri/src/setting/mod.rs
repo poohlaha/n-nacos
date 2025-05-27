@@ -32,6 +32,9 @@ pub struct Settings {
 
     #[serde(rename = "theme")]
     theme: String,
+
+    #[serde(rename = "closeType")]
+    close_type: String,
 }
 
 impl Settings {
@@ -48,7 +51,7 @@ impl Settings {
         }
 
         if let Some(dir) = dir {
-            let file_name = format!("{}.json", CACHE_FILE);
+            let file_name = format!("{}", CACHE_FILE);
             let setting_file_path = dir.join(file_name);
             return Some(setting_file_path.to_string_lossy().to_string());
         }

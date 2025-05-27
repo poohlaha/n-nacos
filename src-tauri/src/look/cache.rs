@@ -49,6 +49,8 @@ pub struct FileMeta {
     pub file_created: String, // 创建时间
     #[serde(rename = "fileUpdated")]
     pub file_updated: String, // 修改时间
+    #[serde(rename = "fileHash")]
+    pub file_hash: String, // 文件 Hash 值
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -183,19 +185,30 @@ impl FileCache {
                 let file_created = metadata.created().ok().and_then(|t| Self::system_time_to_string(t).ok()).unwrap_or_else(|| "".to_string());
                 let file_updated = metadata.modified().ok().and_then(|t| Self::system_time_to_string(t).ok()).unwrap_or_else(|| "".to_string());
 
+                let mut meta = FileMeta::default();
+                let timestamp = metadata.created().ok().and_then(|t| match t.duration_since(std::time::UNIX_EPOCH).map_err(|err| Error::Error(err.to_string()).to_string()) {
+                    Ok(since) => Some(since.as_nanos().to_string()),
+                    Err(err) => {
+                        error!("get file {} hash error: {:?}", meta.file_path, err);
+                        None
+                    }
+                });
+
+                if let Some(timestamp) = timestamp {
+                    meta.file_hash = Self::generate_file_hash(&file_path, &timestamp);
+                }
+
+                meta.file_key = path.to_string_lossy().to_string();
+                meta.file_name = filename.clone();
+                meta.file_path = file_path.clone();
+                meta.file_size = Some(FileUtils::convert_size(metadata.len()));
+                meta.file_created = file_created;
+                meta.file_created = file_updated;
+
                 if path.is_dir() {
-                    return Some(FileMeta {
-                        file_key: path.to_string_lossy().to_string(),
-                        file_name: filename.clone(),
-                        file_path: file_path.clone(),
-                        file_content_type: "".to_string(),
-                        file_kind: "DIR".to_string(),
-                        file_thumbnail_path: "".to_string(),
-                        file_size: Some(FileUtils::convert_size(metadata.len())),
-                        file_type: "DIR".to_string(),
-                        file_created,
-                        file_updated,
-                    });
+                    meta.file_kind = "DIR".to_string();
+                    meta.file_type = "DIR".to_string();
+                    return Some(meta);
                 }
 
                 // 使用 infer 来识别 MIME 类型
@@ -213,20 +226,9 @@ impl FileCache {
                     return None;
                 }
 
-                let info = FileMeta {
-                    file_key: path.to_string_lossy().to_string(),
-                    file_name: filename.clone(),
-                    file_path: file_path.clone(),
-                    file_content_type: "".to_string(),
-                    file_kind: kind.clone(),
-                    file_thumbnail_path: "".to_string(),
-                    file_size: Some(FileUtils::convert_size(metadata.len())),
-                    file_type: "FILE".to_string(),
-                    file_created,
-                    file_updated,
-                };
-
-                Some(info)
+                meta.file_kind = kind.clone();
+                meta.file_type = "FILE".to_string();
+                Some(meta)
             })
             .collect();
 
@@ -360,5 +362,12 @@ impl FileCache {
             }
             Err(_) => {}
         };
+    }
+
+    // 根据文件路径 + 时间 生成文件 hash
+    pub fn generate_file_hash(file_path: &str, timestamp: &str) -> String {
+        let input = format!("{}-{}", file_path, timestamp);
+        let digest = md5::compute(input);
+        format!("file-{:x}", digest)
     }
 }

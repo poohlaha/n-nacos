@@ -109,6 +109,7 @@ async fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_positioner::init())
         // .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
             let window = app.get_webview_window("main");
@@ -150,7 +151,7 @@ async fn main() {
             if let tauri::WindowEvent::Focused(false) = event {
                 info!("focused false...");
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
+                    // let _ = window.hide();
                 }
             }
 

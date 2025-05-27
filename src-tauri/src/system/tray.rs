@@ -2,7 +2,7 @@
 
 use log::error;
 use std::sync::Arc;
-use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
+use tauri::menu::{IsMenuItem, MenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, PhysicalPosition, Wry};
 
@@ -58,15 +58,13 @@ impl Tray {
         }
          */
 
-        let app_clone = Arc::new(app.clone());
-        tray.on_tray_icon_event(move |_, event| {
-            let app_cloned = Arc::clone(&app_clone);
-            // tauri_plugin_positioner::on_tray_event(app.app_handle(), &event);
+        tray.on_tray_icon_event(|_app, event| {
+            tauri_plugin_positioner::on_tray_event(_app.app_handle(), &event);
             match event {
                 TrayIconEvent::Click { id: _, rect: _, button, position, .. } => match button {
                     MouseButton::Left {} => {
                         log::info!("left clicked");
-                        Self::send_tray_menu_message(&*app_cloned, position)
+                        Self::send_tray_menu_message(_app.app_handle(), position)
                     }
                     MouseButton::Right {} => {}
                     _ => {}

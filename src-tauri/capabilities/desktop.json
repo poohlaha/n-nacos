@@ -92,6 +92,9 @@
 
     "process:default",
     "process:allow-restart",
-    "process:allow-exit"
+    "process:allow-exit",
+
+    "positioner:allow-move-window",
+    "positioner:default"
   ]
 }
