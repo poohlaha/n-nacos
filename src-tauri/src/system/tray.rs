@@ -1,6 +1,6 @@
 //! 托盘
 
-use log::error;
+use log::{error, info};
 use tauri::menu::{IsMenuItem, MenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, PhysicalPosition, Wry};
@@ -61,7 +61,10 @@ impl Tray {
             tauri_plugin_positioner::on_tray_event(_app.app_handle(), &event);
             match event {
                 TrayIconEvent::Click { id: _, rect: _, button, position, .. } => match button {
-                    MouseButton::Left {} => Self::send_tray_menu_message(_app.app_handle(), position),
+                    MouseButton::Left {} => {
+                        info!("Tray Icon clicked!");
+                        Self::send_tray_menu_message(_app.app_handle(), position)
+                    },
                     MouseButton::Right {} => {}
                     _ => {}
                 },

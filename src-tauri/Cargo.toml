@@ -26,7 +26,7 @@ tauri-plugin-process = "2"
 tauri-plugin-websocket = "2"
 tauri-plugin-opener = "2"
 
-
+sysinfo = "0.35.1"
 objc = "0.2.7"
 cocoa = "0.26"
 opener = "0.7.2"

@@ -4,6 +4,7 @@
 
 use crate::error::Error;
 use crate::helper::index::Helper;
+use crate::monitor::Monitor;
 use crate::prepare::{get_success_response_by_value, HttpResponse};
 use crate::utils::Utils;
 use handlers::file::FileHandler;
@@ -25,6 +26,9 @@ pub struct ApplicationApp {
     icon: String,  // 应用程序图标
     path: PathBuf, // 应用程序位置
     name: String,  // 应用程序名称
+
+    #[serde(rename = "processIds")]
+    process_ids: Vec<u32>, // 应用程序进程
 }
 
 impl Applications {
@@ -102,6 +106,7 @@ impl Applications {
                             icon: String::new(),
                             path: path.clone(),
                             name: name.to_string(),
+                            process_ids: Vec::new(),
                         };
 
                         let icon_path = Self::generate_png(&icon, name).ok()?;
@@ -116,6 +121,9 @@ impl Applications {
                             }
                         }
 
+                        // 判断是不是在进行
+                        let app_path = path.to_string_lossy().to_string();
+                        application.process_ids = Monitor::new().find_app_process_ids(&application.name, Some(app_path.clone()), Some(String::from("/Applications")));
                         return Some(application);
                     }
                 }
@@ -154,5 +162,18 @@ impl Applications {
         }
 
         Ok(String::new())
+    }
+
+    // 通过进程ID 杀死 APP
+    pub fn kill_app_by_process_ids(pids: &Vec<u32>) -> Result<HttpResponse, String> {
+        let result = Monitor::new().kill_process_list(pids);
+        get_success_response_by_value(result)
+    }
+
+    // 通过 name 和 path 获取进程列表
+    pub fn get_app_process_id(name: &str, path: Option<String>) -> Result<HttpResponse, String> {
+        info!("get app process id from `{}`, `{:?}`", name, path);
+        let process_ids = Monitor::new().find_app_process_ids(&name, path, Some(String::from("/Applications")));
+        get_success_response_by_value(process_ids)
     }
 }

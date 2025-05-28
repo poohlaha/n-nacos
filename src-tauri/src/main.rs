@@ -17,6 +17,9 @@ mod task;
 mod applications;
 mod setting;
 mod utils;
+
+mod monitor;
+
 // mod db;
 
 use lazy_static::lazy_static;
@@ -29,12 +32,12 @@ use crate::look::home::Look;
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
-use exports::applications::get_application_list;
+use exports::applications::{get_app_process_id, get_application_list, kill_app};
 use exports::article::{delete_article, get_archive_article_list, get_article_detail, get_article_list, get_article_tag_classify, get_article_tag_list, get_tag_article_list, save_or_update_article};
 use exports::look::{get_desktop_list, get_document_list, get_download_list, get_pictures_list, get_recent_used};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
-use exports::settings::{get_setting, save_setting, show_dock, hide_dock};
+use exports::settings::{get_setting, hide_dock, save_setting, show_dock};
 use log::info;
 use sqlx::MySql;
 use std::sync::{Arc, Mutex};
@@ -111,7 +114,7 @@ async fn main() {
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_positioner::init())
         // .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _, cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let window = app.get_webview_window("main");
             if let Some(window) = window {
                 window.show().unwrap();
@@ -155,18 +158,17 @@ async fn main() {
                 }
             }
 
+            /*
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                /*
+                info!("close requested !");
                 api.prevent_close(); // 阻止关闭
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.hide(); // 最小化到托盘
                 }
-                 */
-                info!("close requested !");
 
                 // 隐藏 Dock 图标
                 // NSApplicationActivationPolicy::Prohibited: 不会显示在 Dock，无法成为活跃应用，无法接受键盘输入
-                #[cfg(target_os = "macos")]
+                // #[cfg(target_os = "macos")]
                 {
                     use cocoa::appkit::NSApplication;
                     unsafe {
@@ -175,6 +177,7 @@ async fn main() {
                     }
                 }
             }
+             */
         });
 
     let app = builder
@@ -212,6 +215,8 @@ async fn main() {
             save_setting,
             get_setting,
             get_application_list,
+            kill_app,
+            get_app_process_id,
             show_dock,
             hide_dock
         ])
