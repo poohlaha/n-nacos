@@ -98,6 +98,8 @@ fn start_cache_download_dir_timer() {
 // 程序配置目录: /Users/xxx/Library/Application Support/n-nacos
 #[tokio::main]
 async fn main() {
+    info!("PATH: {:?}", std::env::var("PATH"));
+
     // 创建数据库连接池
     Database::create_db().await.unwrap();
 
@@ -110,7 +112,7 @@ async fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_positioner::init())
         // .plugin(tauri_plugin_fs::init())
@@ -152,7 +154,7 @@ async fn main() {
         })
         .on_window_event(|app, event| {
             if let tauri::WindowEvent::Focused(false) = event {
-                info!("focused false...");
+                //info!("focused false...");
                 if let Some(window) = app.get_webview_window("main") {
                     // let _ = window.hide();
                 }

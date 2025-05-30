@@ -1,9 +1,8 @@
 //! 记录流水线日志, 日志目录 {server_id/id}
 
-use crate::error::Error;
 use crate::logger::Logger;
 use handlers::file::FileHandler;
-use log::{error, info};
+use log::{error, info, warn};
 use std::path::PathBuf;
 
 pub struct PipelineLogger;
@@ -68,9 +67,10 @@ impl PipelineLogger {
     pub(crate) fn read_log(file_path: PathBuf) -> Result<String, String> {
         info!("pipeline log path: {:#?}", file_path);
         if !file_path.exists() {
-            return Err(Error::convert_string(&format!("can not find pipeline log file: {:#?} !", file_path)));
+            warn!("can not find pipeline log file: {:#?} !", file_path);
+            return Ok(String::new());
         }
 
-        return FileHandler::read_file_string(file_path.as_path().to_string_lossy().to_string().as_str());
+        FileHandler::read_file_string(file_path.as_path().to_string_lossy().to_string().as_str())
     }
 }

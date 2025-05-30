@@ -64,7 +64,7 @@ impl Tray {
                     MouseButton::Left {} => {
                         info!("Tray Icon clicked!");
                         Self::send_tray_menu_message(_app.app_handle(), position)
-                    },
+                    }
                     MouseButton::Right {} => {}
                     _ => {}
                 },

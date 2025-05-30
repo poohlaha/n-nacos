@@ -1,5 +1,6 @@
 //! Helper handle
 
+use crate::setting::Settings;
 use crate::PROJECT_NAME;
 use handlers::file::FileHandler;
 use log::{error, info};
@@ -40,7 +41,14 @@ impl Helper {
 
     /// 获取版本
     pub(crate) fn get_cmd_version(name: &str) -> String {
-        let output = Command::new(&name).arg("--version").output();
+        let mut cmd = Command::new(&name);
+        cmd.arg("--version");
+
+        if let Some(path) = Self::get_shell_path() {
+            cmd.env("PATH", path);
+        }
+
+        let output = cmd.output();
         return match output {
             Ok(output) => {
                 if output.status.success() {
@@ -60,7 +68,7 @@ impl Helper {
                 String::new()
             }
             Err(err) => {
-                info!("get `{}` version error: {:#?}", name, err);
+                error!("get `{}` version error: {:#?}", name, err);
                 String::new()
             }
         };
@@ -74,9 +82,19 @@ impl Helper {
             command = "where"
         }
 
-        match Command::new(command).arg(name).output() {
+        let mut cmd = Command::new(command);
+        cmd.arg(name);
+
+        if let Some(path) = Self::get_shell_path() {
+            cmd.env("PATH", path);
+        }
+
+        match cmd.output() {
             Ok(output) => output.status.success(),
-            Err(_) => false,
+            Err(err) => {
+                error!("which command failed: {:#?}", err);
+                false
+            }
         }
     }
 
@@ -98,7 +116,13 @@ impl Helper {
         {
             let msg = &format!("exec command: {}", _command);
             func(&msg);
-            let child = Command::new("cmd").args(&["/C", &_command]).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
+
+            let mut cmd = Command::new("cmd");
+            cmd.args(&["/C", &_command]);
+            if let Some(path) = Self::get_shell_path() {
+                cmd.env("PATH", path);
+            }
+            let child = cmd.current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
             return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| {
                 func(&msg);
             });
@@ -109,7 +133,13 @@ impl Helper {
         {
             let msg = &format!("exec command: {}", _command);
             func(&msg);
-            let child = Command::new("sh").arg("-c").arg(command).current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
+
+            let mut cmd = Command::new("sh");
+            cmd.arg("-c").arg(command);
+            if let Some(path) = Self::get_shell_path() {
+                cmd.env("PATH", path);
+            }
+            let child = cmd.current_dir(current_dir).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
             return Self::get_exec_command_real_time_output_by_spawn(child, move |msg| {
                 func(&msg);
             });
@@ -256,5 +286,36 @@ impl Helper {
         // let has_error = has_error.lock().unwrap();
         // let has_error = has_error.clone();
         return success;
+    }
+
+    fn get_shell_path() -> Option<String> {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let output = Command::new(shell)
+            .arg("-l") // login shell
+            .arg("-c")
+            .arg("echo $PATH")
+            .stdout(Stdio::piped())
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let mut shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+            // 移除 Volta 相关路径
+            let mut new_path = shell_path.split(':').filter(|p| !p.contains(".volta")).collect::<Vec<_>>().join(":");
+
+            // 添加 node 目录
+            let settings = Settings::get_settings();
+            if let Some(settings) = settings {
+                if !settings.node_js_dir.is_empty() {
+                    new_path = format!("{}:{}", settings.node_js_dir, new_path);
+                }
+            }
+
+            info!("path: {:#?}", new_path);
+            Some(new_path)
+        } else {
+            None
+        }
     }
 }

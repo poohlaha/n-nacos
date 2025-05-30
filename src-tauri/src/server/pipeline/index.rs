@@ -748,6 +748,7 @@ impl Pipeline {
         let installed_commands = H5FileHandler::get_installed_commands();
         // node 版本
         let node = Helper::get_cmd_version("node");
+        info!("node version: {}", node);
 
         if need_get_child {
             for pipe in list.iter_mut() {

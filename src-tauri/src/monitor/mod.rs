@@ -1,6 +1,5 @@
 //! 通过 sysinfo 来获取系统信息
 
-use log::info;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use sysinfo::{Pid, Signal, System};
@@ -73,8 +72,8 @@ impl Monitor {
             })
             .collect();
 
-        info!("processes: {:#?}", process_list);
-        info!("app path: {:#?}", app_path);
+        // info!("processes: {:#?}", process_list);
+        // info!("app path: {:#?}", app_path);
         let processes: Vec<u32> = process_list
             .iter()
             .filter_map(|(pid, path, name)| {

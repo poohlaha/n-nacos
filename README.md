@@ -17,6 +17,11 @@ make run # 运行
 make build # 打包
 ```
 
+## 检查动态链接库
+```shell
+otool -L src-tauri/target/release/n-nacos
+```
+
 ## Rust 插件
 - 监控程序
   [n-nacos-tools](https://github.com/poohlaha/monitor)

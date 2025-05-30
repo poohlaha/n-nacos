@@ -16,25 +16,28 @@ const CACHE_FILE: &str = "settings.json";
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(rename = "titleFontSize")]
-    title_font_size: String,
+    pub(crate) title_font_size: String,
 
     #[serde(rename = "fontSize")]
-    font_size: String,
+    pub(crate) font_size: String,
 
     #[serde(rename = "descFontSize")]
-    desc_font_size: String,
+    pub(crate) desc_font_size: String,
 
     #[serde(rename = "fontFamily")]
-    font_family: String,
+    pub(crate) font_family: String,
 
     #[serde(rename = "autoStart")]
-    auto_start: String,
+    pub(crate) auto_start: String,
 
     #[serde(rename = "theme")]
-    theme: String,
+    pub(crate) theme: String,
 
     #[serde(rename = "closeType")]
-    close_type: String,
+    pub(crate) close_type: String,
+
+    #[serde(rename = "nodeJsDir")]
+    pub(crate) node_js_dir: String,
 }
 
 impl Settings {
@@ -85,13 +88,13 @@ impl Settings {
         Ok(get_error_response("Failed to write settings, no config dir found !"))
     }
 
-    pub fn get() -> Result<HttpResponse, String> {
+    pub fn get_settings() -> Option<Settings> {
         let setting_file_path = Self::get_cache_file();
         if let Some(setting_file_path) = setting_file_path {
             let path = PathBuf::from(&setting_file_path);
             if !path.exists() {
                 info!("no cache file `{}` found !", setting_file_path);
-                return Ok(get_success_response(None));
+                return None;
             }
 
             let content = FileHandler::read_file_string(&setting_file_path);
@@ -105,22 +108,31 @@ impl Settings {
 
             if let Some(content) = content {
                 if content.is_empty() {
-                    return Ok(get_success_response(None));
+                    return None;
                 }
 
                 let settings: Result<Settings, String> = serde_json::from_str(&content).map_err(|err| Error::Error(err.to_string()).to_string());
 
                 return match settings {
-                    Ok(settings) => get_success_response_by_value(Some(settings)),
+                    Ok(settings) => Some(settings),
                     Err(err) => {
                         let msg = format!("failed to deserialize settings: {:#?}", err);
                         info!("{}", msg);
-                        Ok(get_error_response(&msg))
+                        None
                     }
                 };
             }
         }
 
-        Ok(get_error_response("Failed to get settings files !"))
+        None
+    }
+
+    pub fn get() -> Result<HttpResponse, String> {
+        let settings = Self::get_settings();
+        if let Some(settings) = settings {
+            return get_success_response_by_value(Some(settings));
+        }
+
+        Ok(get_success_response(None))
     }
 }
