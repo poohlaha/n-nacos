@@ -146,10 +146,8 @@ impl Applications {
 
     // 使用 encoding_rs 读取 UTF-16LE 或 UTF-16BE 文件
     fn read_utf16_auto(path: &PathBuf) -> Option<String> {
-        let data = match fs::read(path){
-            Ok(data) => {
-                data
-            }
+        let data = match fs::read(path) {
+            Ok(data) => data,
             Err(err) => {
                 error!("read `{:#?}` error: {:#?}", path, err);
                 Vec::new()
