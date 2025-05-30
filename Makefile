@@ -17,6 +17,11 @@ run:
 	$(call webInstall)
 	cd $(ROOT_ENCLOSURE_DIR) && pnpm i && pnpm tauri dev
 
+buildDev:
+	$(call webInstall)
+	cd $(ROOT_ENCLOSURE_DIR) && pnpm i && pnpm tauri build --debug
+
 build:
 	$(call webInstall)
-	cd $(ROOT_ENCLOSURE_DIR) && pnpm i && pnpm tauri build --bundles app
+	cd $(ROOT_ENCLOSURE_DIR) && pnpm i && pnpm tauri build
+    # pnpm tauri build --bundles app
