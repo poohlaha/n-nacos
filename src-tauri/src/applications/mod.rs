@@ -9,7 +9,7 @@ use crate::prepare::{get_success_response_by_value, HttpResponse};
 use crate::utils::Utils;
 use handlers::file::FileHandler;
 use log::{error, info};
-use plist::Value;
+use plist::{Dictionary, Value};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fs;
@@ -26,6 +26,8 @@ pub struct ApplicationApp {
     icon: String,  // 应用程序图标
     path: PathBuf, // 应用程序位置
     name: String,  // 应用程序名称
+    #[serde(rename = "realName")]
+    real_name: String, // 应用程序真正名字
 
     #[serde(rename = "processIds")]
     process_ids: Vec<u32>, // 应用程序进程
@@ -101,13 +103,12 @@ impl Applications {
                 // let file_path = path.to_string_lossy().to_string();
                 if path.extension().and_then(|s| s.to_str()) == Some("app") {
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        let icon = Self::get_app_icon_path(&path).ok()?;
-                        let mut application = ApplicationApp {
-                            icon: String::new(),
-                            path: path.clone(),
-                            name: name.to_string(),
-                            process_ids: Vec::new(),
-                        };
+                        let (icon, app_name) = Self::get_app_icon_and_name(&path).ok()?;
+
+                        let mut application = ApplicationApp::default();
+                        application.path = path.clone();
+                        application.name = name.to_string();
+                        application.real_name = app_name;
 
                         let icon_path = Self::generate_png(&icon, name).ok()?;
                         // 生成base64
@@ -135,14 +136,89 @@ impl Applications {
         get_success_response_by_value(apps)
     }
 
-    // 获取 app 应用图标, 读取 `Info.plist` 中的字段 `CFBundleIconFile` 的值, 然后在 Resources 中查找
-    fn get_app_icon_path(app_path: &PathBuf) -> Result<String, String> {
+    // 读取 Info.plist
+    fn get_info_p_list_direction(app_path: &PathBuf) -> Result<Value, String> {
         let plist_path = app_path.join("Contents").join("Info.plist");
         let plist_data = fs::read(plist_path).map_err(|err| Error::Error(err.to_string()).to_string())?;
         let plist: Value = plist::from_bytes(&plist_data).map_err(|err| Error::Error(err.to_string()).to_string())?;
+        Ok(plist)
+    }
+
+    // 使用 encoding_rs 读取 UTF-16LE 或 UTF-16BE 文件
+    fn read_utf16_auto(path: &PathBuf) -> Option<String> {
+        let data = match fs::read(path){
+            Ok(data) => {
+                data
+            }
+            Err(err) => {
+                error!("read `{:#?}` error: {:#?}", path, err);
+                Vec::new()
+            }
+        };
+
+        if data.is_empty() {
+            return None;
+        }
+
+        // 尝试 UTF-16LE
+        let (cow, _, had_errors) = encoding_rs::UTF_16LE.decode(&data);
+        if !had_errors {
+            return Some(cow.into_owned());
+        }
+
+        // 如果失败，尝试 UTF-16BE
+        let (cow, _, _) = encoding_rs::UTF_16BE.decode(&data);
+        Some(cow.into_owned())
+    }
+
+    // 读取 InfoPlist.strings
+    fn get_info_p_list_strings_values(app_path: &PathBuf, name: &str) -> String {
+        let plist_path = app_path.join("Contents").join("Resources").join(name).join("InfoPlist.strings");
+        if !plist_path.exists() {
+            info!("`{:?} not exists", plist_path);
+            return String::new();
+        }
+
+        let data = match FileHandler::read_file_string(plist_path.to_string_lossy().to_string().as_str()) {
+            Ok(data) => data,
+            Err(err) => {
+                error!("read `{:#?}` error: {:#?}", plist_path, err);
+
+                // 重新使用 encoding_rs 读取 UTF-16LE 或 UTF-16BE 文件
+                let value = Self::read_utf16_auto(&plist_path);
+                if let Some(value) = value {
+                    value
+                } else {
+                    String::new()
+                }
+            }
+        };
+
+        if data.is_empty() {
+            return String::new();
+        }
+
+        for line in data.lines() {
+            if line.contains("CFBundleDisplayName") || line.contains("CFBundleName") {
+                let parts: Vec<_> = line.split('=').collect();
+                if parts.len() == 2 {
+                    let val = parts[1].trim().trim_matches(';').trim_matches('"');
+                    return val.to_string();
+                }
+            }
+        }
+
+        String::new()
+    }
+
+    // 获取 app 应用图标, 读取 `Info.plist` 中的字段 `CFBundleIconFile` 的值, 然后在 Resources 中查找
+    fn get_app_icon_and_name(app_path: &PathBuf) -> Result<(String, String), String> {
+        let plist: Value = Self::get_info_p_list_direction(&app_path)?;
 
         let dir = plist.as_dictionary();
         if let Some(dir) = dir {
+            // 获取 app icon
+            let mut app_icon_path = String::new();
             let value = dir.get("CFBundleIconFile");
             if let Some(value) = value {
                 let icon_file = value.as_string();
@@ -155,13 +231,69 @@ impl Applications {
 
                     let icon_path = app_path.join("Contents").join("Resources").join(icon_name);
                     if icon_path.exists() {
-                        return Ok(icon_path.to_string_lossy().to_string());
+                        app_icon_path = icon_path.to_string_lossy().to_string()
                     }
                 }
             }
+
+            let app_name = Self::get_app_name(app_path, dir)?;
+            return Ok((app_icon_path, app_name));
         }
 
-        Ok(String::new())
+        Ok((String::new(), String::new()))
+    }
+
+    /*
+     获取 app 名字
+      pInfo.list:
+      CFBundleDisplayName：用户可见的显示名称（可选）
+      CFBundleName：应用的名称（如果没有 CFBundleDisplayName，可用它）
+      CFBundleExecutable：可执行文件名
+
+      但取中文名一般位于以下文件的 `CFBundleDisplayName` 和 `CFBundleName`:
+      应用程序/Contents/Resources/zh_CN.lproj/InfoPlist.strings
+      应用程序/Contents/Resources/zh-Hans.lproj/InfoPlist.strings
+      应用程序/Contents/Resources/Base.lproj/InfoPlist.strings
+
+    */
+
+    // 但取中文名
+    fn get_app_name(app_path: &PathBuf, dir: &Dictionary) -> Result<String, String> {
+        // 1. 优先获取中文名 InfoPlist.strings
+        let lproj_dirs = ["zh_CN.lproj", "zh-Hans.lproj", "zh-Hans-CN.lproj", "Base.lproj"];
+        for lproj in &lproj_dirs {
+            let strings_path = app_path.join(lproj);
+            info!("path: {}", strings_path.to_string_lossy());
+            let name = Self::get_info_p_list_strings_values(app_path, lproj);
+            if !name.is_empty() {
+                return Ok(name);
+            }
+        }
+
+        // 2. 回退到 Info.plist
+        let mut name = Self::get_value_from_bundle(dir, "CFBundleDisplayName");
+        if name.is_empty() {
+            name = Self::get_value_from_bundle(dir, "CFBundleName");
+        }
+
+        if name.is_empty() {
+            return Ok(String::new());
+        }
+
+        Ok(name)
+    }
+
+    // 获取 `CFBundle` 开头的字段值
+    fn get_value_from_bundle(dir: &Dictionary, name: &str) -> String {
+        let value = dir.get(name);
+        if let Some(value) = value {
+            let value = value.as_string();
+            if let Some(value) = value {
+                return value.to_string();
+            }
+        }
+
+        String::new()
     }
 
     // 通过进程ID 杀死 APP
