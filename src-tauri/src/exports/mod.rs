@@ -7,3 +7,6 @@ pub(crate) mod server;
 
 pub(crate) mod applications;
 pub(crate) mod settings;
+
+pub(crate) mod answer;
+pub(crate) mod robot;

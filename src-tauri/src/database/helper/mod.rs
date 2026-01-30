@@ -54,7 +54,7 @@ impl DBHelper {
     {
         let pool = Self::get_pools();
         let result = query.fetch_optional(&pool).await.map_err(|err| {
-            let msg = format!("query server list error: {:#?}", err);
+            let msg = format!("query list error: {:#?}", err);
             error!("{}", msg);
             Error::Error(msg).to_string()
         })?;
@@ -69,7 +69,7 @@ impl DBHelper {
         let pool = Self::get_pools();
 
         let results: Result<Vec<O>, String> = query.fetch_all(&pool).await.map_err(|err| {
-            let msg = format!("query server list error: {:#?}", err);
+            let msg = format!("query list error: {:#?}", err);
             error!("{}", msg);
             Error::Error(msg).to_string()
         });

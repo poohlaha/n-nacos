@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod answer;
+mod applications;
 mod article;
 mod database;
 mod error;
@@ -9,17 +11,14 @@ mod exports;
 mod helper;
 mod logger;
 mod look;
+mod monitor;
 mod prepare;
+mod robot;
 mod server;
+mod setting;
 mod system;
 mod task;
-
-mod applications;
-mod setting;
 mod utils;
-
-mod monitor;
-
 // mod db;
 
 use lazy_static::lazy_static;
@@ -32,10 +31,12 @@ use crate::look::home::Look;
 use crate::server::pipeline::pool::Pool;
 use crate::server::pipeline::props::PipelineStageTask;
 use crate::system::tray::Tray;
+use exports::answer::{get_answer_config, save_or_update_answer_config, start_answer};
 use exports::applications::{get_app_process_id, get_application_list, kill_app};
 use exports::article::{delete_article, get_archive_article_list, get_article_detail, get_article_list, get_article_tag_classify, get_article_tag_list, get_tag_article_list, save_or_update_article};
 use exports::look::{get_desktop_list, get_document_list, get_download_list, get_pictures_list, get_recent_used};
 use exports::pipeline::{clear_run_history, delete_pipeline, get_pipeline_detail, get_pipeline_list, get_runtime_history, insert_pipeline, pipeline_batch_run, pipeline_run, query_os_commands, update_pipeline};
+use exports::robot::{get_robot_config, save_robot_config};
 use exports::server::{delete_server, get_server_detail, get_server_list, insert_server, update_server};
 use exports::settings::{get_setting, hide_dock, save_setting, show_dock};
 use log::info;
@@ -220,7 +221,12 @@ async fn main() {
             kill_app,
             get_app_process_id,
             show_dock,
-            hide_dock
+            hide_dock,
+            get_answer_config,
+            save_or_update_answer_config,
+            start_answer,
+            get_robot_config,
+            save_robot_config
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

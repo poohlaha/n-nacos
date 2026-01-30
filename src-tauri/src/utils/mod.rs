@@ -1,8 +1,11 @@
 use base64::Engine;
 
+pub(crate) mod cache;
 pub mod file;
 
 pub struct Utils;
+
+pub struct Cache;
 
 impl Utils {
     /// 生成 base64 图片

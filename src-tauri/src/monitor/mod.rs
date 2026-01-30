@@ -50,7 +50,7 @@ impl Monitor {
     // 获取应用程序进程 ID 列表
     pub fn find_app_process_ids(&mut self, app_name: &str, app_path: Option<String>, prefix: Option<String>) -> Vec<u32> {
         self.sys.refresh_all();
-        let mut processes = self.sys.processes();
+        let processes = self.sys.processes();
         let process_list: Vec<(Pid, String, String)> = processes
             .iter()
             .filter_map(|(pid, process)| {

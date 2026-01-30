@@ -288,7 +288,7 @@ impl Helper {
         return success;
     }
 
-    fn get_shell_path() -> Option<String> {
+    pub fn get_shell_path() -> Option<String> {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
         let output = Command::new(shell)
             .arg("-l") // login shell
@@ -299,7 +299,7 @@ impl Helper {
             .ok()?;
 
         if output.status.success() {
-            let mut shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
             // 移除 Volta 相关路径
             let mut new_path = shell_path.split(':').filter(|p| !p.contains(".volta")).collect::<Vec<_>>().join(":");
